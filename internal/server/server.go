@@ -35,6 +35,10 @@ func New(projectHandler *handler.ProjectHandler, port string) *Server {
 		})
 	})
 
+	// Swagger UI
+	r.Get("/docs", handler.ServeSwaggerUI)
+	r.Get("/docs/openapi.yaml", handler.ServeSpec)
+
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))

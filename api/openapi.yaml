@@ -1,0 +1,408 @@
+openapi: 3.0.3
+info:
+  title: InfraLens API
+  description: |
+    REST API for the InfraLens construction intelligence platform.
+
+    InfraLens crawls public RERA registries (starting with MahaRERA), normalizes
+    project and promoter metadata, tracks field-level changes over time, and exposes
+    that data for search and analysis.
+
+    ## Key concepts
+    - **Projects** — RERA-registered real estate projects with status, type, dates, unit counts
+    - **Promoters** — Developers/builders linked to one or more projects
+    - **Changes** — Field-level audit log of what changed between crawls (old value → new value)
+  version: 1.0.0
+  contact:
+    name: InfraLens
+    url: https://github.com/AadithS13/InfraLens
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Projects
+    description: Search, filter, and retrieve RERA project data
+  - name: Changes
+    description: Field-level change history per project
+  - name: Health
+    description: Server health check
+
+paths:
+
+  /api/v1/projects:
+    get:
+      tags: [Projects]
+      summary: Search projects
+      description: |
+        Returns a paginated list of RERA projects. All filters are optional and
+        can be combined. String filters use case-insensitive partial matching (ILIKE).
+      operationId: listProjects
+      parameters:
+        - name: city
+          in: query
+          description: Partial match on project city
+          schema:
+            type: string
+          example: Nagpur
+        - name: district
+          in: query
+          description: Partial match on district
+          schema:
+            type: string
+          example: Thane
+        - name: state
+          in: query
+          description: Partial match on state
+          schema:
+            type: string
+          example: Maharashtra
+        - name: promoter
+          in: query
+          description: Partial match on promoter / builder name
+          schema:
+            type: string
+          example: Prestige
+        - name: status
+          in: query
+          description: Exact match on project status
+          schema:
+            type: string
+            enum: [New, Ongoing, Lapsed, Revoked]
+          example: Ongoing
+        - name: type
+          in: query
+          description: Partial match on project type
+          schema:
+            type: string
+          example: Residential
+        - name: page
+          in: query
+          description: Page number (1-based)
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          description: Results per page (max 100)
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Paginated list of projects
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListResponse'
+              example:
+                data:
+                  - id: 5
+                    maha_id: 5
+                    rera_registration_no: P51700002065
+                    project_name: MERIDIAN MYSTIC
+                    project_type: Residential / Group Housing
+                    project_status: Ongoing
+                    project_current_status: Certificate Signed
+                    rera_registration_date: "2017-05-20T00:00:00Z"
+                    proposed_completion_date: "2021-12-31T00:00:00Z"
+                    total_units: 120
+                    total_sold_units: 45
+                    promoter_name: MANOJ AWASTHI
+                    city: Nerul Navi Mumbai
+                    district: Thane
+                    state: MAHARASHTRA
+                    pincode: "400706"
+                meta:
+                  page: 1
+                  limit: 20
+                  total: 1547
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/projects/{id}:
+    get:
+      tags: [Projects]
+      summary: Get project detail
+      description: |
+        Returns full detail for a single project including promoter info,
+        project address, promoter address, and all contacts (architects, engineers, agents).
+      operationId: getProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Project detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ProjectDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/projects/{id}/changes:
+    get:
+      tags: [Changes]
+      summary: Get project change history
+      description: |
+        Returns the full field-level change history for a project, most recent first.
+
+        A change is recorded whenever a crawl detects a different value for a tracked
+        field compared to the previous snapshot. Each row captures the field name,
+        old value, new value, and when the change was detected.
+
+        **Tracked fields:** `project_status`, `project_current_status`,
+        `proposed_completion_date`, `project_name`, `total_units`,
+        `total_sold_units`, `rera_registration_no`
+      operationId: getProjectChanges
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Change history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChangeItem'
+              example:
+                data:
+                  - field_name: project_status
+                    old_value: Under Approval
+                    new_value: Ongoing
+                    detected_at: "2026-06-06T09:33:55Z"
+                  - field_name: proposed_completion_date
+                    old_value: "2024-12-31"
+                    new_value: "2025-06-30"
+                    detected_at: "2026-05-01T02:10:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+components:
+
+  parameters:
+    ProjectID:
+      name: id
+      in: path
+      required: true
+      description: Internal project ID (from the `id` field in list responses)
+      schema:
+        type: integer
+        example: 42
+
+  schemas:
+
+    ProjectListItem:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Internal DB id
+        maha_id:
+          type: integer
+          description: MahaRERA internal project ID (sequential integer)
+        rera_registration_no:
+          type: string
+          example: P51700002065
+        project_name:
+          type: string
+          example: MERIDIAN MYSTIC
+        project_type:
+          type: string
+          example: Residential / Group Housing
+        project_status:
+          type: string
+          example: Ongoing
+        project_current_status:
+          type: string
+          example: Certificate Signed
+        rera_registration_date:
+          type: string
+          format: date-time
+          nullable: true
+        proposed_completion_date:
+          type: string
+          format: date-time
+          nullable: true
+        total_units:
+          type: integer
+        total_sold_units:
+          type: integer
+        promoter_name:
+          type: string
+        city:
+          type: string
+        district:
+          type: string
+        state:
+          type: string
+        pincode:
+          type: string
+
+    Address:
+      type: object
+      properties:
+        line1:
+          type: string
+        line2:
+          type: string
+        city:
+          type: string
+        district:
+          type: string
+        state:
+          type: string
+        pincode:
+          type: string
+
+    Contact:
+      type: object
+      properties:
+        role:
+          type: string
+          example: Architect
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+
+    PromoterDetail:
+      type: object
+      properties:
+        name:
+          type: string
+        pan:
+          type: string
+        gstin:
+          type: string
+        promoter_type:
+          type: string
+        address:
+          $ref: '#/components/schemas/Address'
+
+    ProjectDetail:
+      allOf:
+        - $ref: '#/components/schemas/ProjectListItem'
+        - type: object
+          properties:
+            acknowledgement_number:
+              type: string
+            original_completion_date:
+              type: string
+              format: date-time
+              nullable: true
+            is_migrated:
+              type: boolean
+            project_address:
+              $ref: '#/components/schemas/Address'
+            promoter:
+              $ref: '#/components/schemas/PromoterDetail'
+            contacts:
+              type: array
+              items:
+                $ref: '#/components/schemas/Contact'
+
+    ChangeItem:
+      type: object
+      properties:
+        field_name:
+          type: string
+          example: project_status
+        old_value:
+          type: string
+          example: Under Approval
+        new_value:
+          type: string
+          example: Ongoing
+        detected_at:
+          type: string
+          format: date-time
+
+    Meta:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+
+    ProjectListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectListItem'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: project not found
+
+  responses:
+    BadRequest:
+      description: Invalid request parameter
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: invalid project id
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: project not found
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: internal server error
