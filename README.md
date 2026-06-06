@@ -1,8 +1,8 @@
 # InfraLens
 
-A construction intelligence platform that crawls public RERA registries, normalizes project and promoter metadata, and maintains a structured Postgres database for analysis.
+A construction intelligence platform that crawls public RERA registries, normalizes project and promoter metadata, maintains field-level change history, and exposes a REST API for search and analysis.
 
-Inspired by platforms like Biltrax — built to demonstrate real-world data engineering: web crawling, API reverse engineering, idempotent ingestion, and field-level change detection.
+Inspired by platforms like Biltrax — built to demonstrate real-world data engineering: web crawling, API reverse engineering, idempotent ingestion, change detection, and layered API design.
 
 ---
 
@@ -27,7 +27,7 @@ MahaRERA API
      ▼
 ┌──────────────────────────────────────┐
 │  Crawler (Go)                        │
-│  ├── Auth (Keycloak JWT, auto-refresh│
+│  ├── Auth (Keycloak JWT, auto-refresh)│
 │  ├── Worker Pool (5 goroutines)      │
 │  ├── Rate Limiting (300ms/worker)    │
 │  ├── Idempotent Upserts             │
@@ -44,6 +44,14 @@ MahaRERA API
    │  project_snapshots  │
    │  project_changes    │
    └─────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────┐
+│  REST API (Go)                       │
+│  ├── server  — HTTP, routing         │
+│  ├── core    — business logic, DTOs  │
+│  └── repo    — SQL queries           │
+└──────────────────────────────────────┘
 ```
 
 ---
@@ -76,10 +84,10 @@ Fetch latest snapshot from DB
         │
         ├── No snapshot?  → [NEW]  Insert everything
         │
-        ├── Same checksum → [SAME] Skip, no changes
+        ├── Same checksum → [SAME] Skip, nothing to do
         │
         └── Different?   → [DIFF] Decode old snapshot JSON
-                                  Compare tracked fields
+                                  Compare 7 tracked fields
                                   Write rows to project_changes
 ```
 
@@ -108,12 +116,115 @@ WHERE pc.field_name = 'project_status'
 -- Which builders changed project status?
 SELECT pr.name, COUNT(*) as changes
 FROM project_changes pc
-JOIN projects p  ON p.id = pc.project_id
+JOIN projects p   ON p.id  = pc.project_id
 JOIN promoters pr ON pr.id = p.promoter_id
 WHERE pc.field_name = 'project_status'
 GROUP BY pr.name
 ORDER BY changes DESC;
 ```
+
+---
+
+## Search API
+
+### Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/projects` | Search projects with filters and pagination |
+| `GET` | `/api/v1/projects/{id}` | Full project detail — promoter, addresses, contacts |
+| `GET` | `/api/v1/projects/{id}/changes` | Field-level change history for a project |
+| `GET` | `/health` | Health check |
+
+### Query Parameters — `GET /api/v1/projects`
+
+| Param | Type | Description |
+|---|---|---|
+| `city` | string | Partial match on project city |
+| `district` | string | Partial match on district |
+| `state` | string | Partial match on state |
+| `promoter` | string | Partial match on promoter/builder name |
+| `status` | string | Exact match on project status |
+| `type` | string | Partial match on project type |
+| `page` | int | Page number (default: 1) |
+| `limit` | int | Results per page (default: 20, max: 100) |
+
+### Example Requests
+
+```bash
+# All projects in Nagpur
+GET /api/v1/projects?district=Nagpur
+
+# Ongoing residential projects, page 2
+GET /api/v1/projects?status=Ongoing&type=Residential&page=2&limit=20
+
+# Projects by a specific builder
+GET /api/v1/projects?promoter=Prestige
+
+# Full project detail
+GET /api/v1/projects/42
+
+# What changed on project 42?
+GET /api/v1/projects/42/changes
+```
+
+### Example Response — `GET /api/v1/projects`
+
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "maha_id": 5,
+      "rera_registration_no": "P51700002065",
+      "project_name": "MERIDIAN MYSTIC",
+      "project_type": "Residential / Group Housing",
+      "project_status": "Ongoing",
+      "project_current_status": "Certificate Signed",
+      "rera_registration_date": "2017-05-20T00:00:00Z",
+      "proposed_completion_date": "2021-12-31T00:00:00Z",
+      "total_units": 0,
+      "total_sold_units": 0,
+      "promoter_name": "MANOJ AWASTHI",
+      "city": "Nerul Navi Mumbai",
+      "district": "Thane",
+      "state": "MAHARASHTRA",
+      "pincode": "400706"
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "limit": 20,
+    "total": 1547
+  }
+}
+```
+
+### Layered Architecture
+
+The API follows a strict three-layer design:
+
+```
+Request
+   │
+   ▼
+server/handler    — parse params, write JSON, nothing else
+   │
+   ▼
+core              — business logic, pagination defaults, DTOs
+   │              — defines ProjectRepo interface (repo is swappable)
+   ▼
+repo              — SQL only, returns typed structs
+   │
+   ▼
+PostgreSQL
+```
+
+| Layer | Package | Responsibility |
+|---|---|---|
+| HTTP | `internal/server` | Routing (chi), middleware, request/response |
+| Business | `internal/core` | Validation, defaults, orchestration, DTOs |
+| Data | `internal/repo` | SQL queries, DB connection |
 
 ---
 
@@ -123,8 +234,8 @@ ORDER BY changes DESC;
 |---|---|---|
 | **V1** | Data ingestion — crawl MahaRERA, normalize, store | ✅ Done |
 | **V2** | Idempotent crawling — checksum comparison, field-level change detection | ✅ Done |
-| **V3** | Scheduled crawling — nightly cron, `crawl_runs` tracking, retries | 🔜 Next |
-| **V4** | Search API — filter by city, district, builder, status | 🔜 |
+| **V3** | Search API — layered REST API with filters, pagination, change history | ✅ Done |
+| **V4** | Scheduled crawling — nightly cron, `crawl_runs` tracking, retries | 🔜 Next |
 | **V5** | Notifications — email/webhook on status changes or new registrations | 🔜 |
 | **V6** | Duplicate detection — trigram similarity + Levenshtein for project name dedup | 🔜 |
 
@@ -132,7 +243,8 @@ ORDER BY changes DESC;
 
 ## Tech Stack
 
-- **Go 1.22** — crawler, HTTP client, worker pool, change detection
+- **Go 1.23** — crawler, HTTP client, worker pool, REST API
+- **chi** — lightweight HTTP router
 - **PostgreSQL 16** — primary store
 - **Docker** — local Postgres via docker-compose
 
@@ -162,13 +274,30 @@ DATABASE_URL="postgres://infralens:infralens@127.0.0.1:5433/infralens?sslmode=di
   go run ./cmd/crawler/
 ```
 
+### 3. Run the API server
+
+```bash
+DATABASE_URL="postgres://infralens:infralens@127.0.0.1:5433/infralens?sslmode=disable" \
+  PORT=8080 \
+  go run ./cmd/api/
+```
+
 ### Environment Variables
+
+**Crawler (`cmd/crawler`)**
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATABASE_URL` | `postgres://infralens:infralens@localhost:5432/infralens?sslmode=disable` | Postgres connection string |
+| `DATABASE_URL` | `postgres://infralens:infralens@localhost:5433/infralens?sslmode=disable` | Postgres DSN |
 | `START_ID` | `1` | First MahaRERA project ID to crawl |
 | `END_ID` | `100000` | Last MahaRERA project ID to crawl |
+
+**API Server (`cmd/api`)**
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `postgres://infralens:infralens@localhost:5433/infralens?sslmode=disable` | Postgres DSN |
+| `PORT` | `8080` | HTTP port |
 
 ---
 
@@ -181,7 +310,7 @@ Project IDs are sequential integers. For each ID the crawler makes 7 parallel AP
 | Endpoint | Data fetched |
 |---|---|
 | `getProjectGeneralDetailsByProjectId` | Name, RERA number, status, type, dates, `userProfileId` |
-| `getProjectAndAssociatedPromoterDetails` | Promoter name (used as fallback when general details is empty) |
+| `getProjectAndAssociatedPromoterDetails` | Promoter name (fallback when general details is empty) |
 | `fetchPromoterGeneralDetails` | PAN, GSTIN, promoter type |
 | `getProjectLandAddressDetails` | Project land address (plot, street, district, state) |
 | `getPromoterAddressDetails` | Promoter office address |
@@ -209,17 +338,28 @@ migrations/
 ```
 InfraLens/
 ├── cmd/
+│   ├── api/
+│   │   └── main.go              # API server entry point
 │   └── crawler/
-│       └── main.go              # Entry point, reads env vars
+│       └── main.go              # Crawler entry point
 ├── internal/
 │   ├── client/
 │   │   └── maharera.go          # HTTP client, Keycloak auth, all API methods
 │   ├── model/
 │   │   └── project.go           # API response structs + DB models
 │   ├── store/
-│   │   └── postgres.go          # Upserts, snapshot reads, change inserts
-│   └── crawler/
-│       └── crawler.go           # Worker pool, orchestration, diff logic
-├── migrations/                  # SQL migration files (timestamp-named)
+│   │   └── postgres.go          # Crawler write layer (upserts, snapshots, changes)
+│   ├── crawler/
+│   │   └── crawler.go           # Worker pool, orchestration, diff logic
+│   ├── repo/
+│   │   └── project.go           # API read layer (search, detail, changes)
+│   ├── core/
+│   │   ├── project.go           # ProjectService — business logic
+│   │   └── types.go             # DTOs, SearchFilter, ListResponse
+│   └── server/
+│       ├── server.go            # chi router, middleware, graceful shutdown
+│       └── handler/
+│           └── project.go       # HTTP handlers
+├── migrations/
 └── docker-compose.yml
 ```
