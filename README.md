@@ -21,42 +21,109 @@ InfraLens crawls the **MahaRERA** (Maharashtra Real Estate Regulatory Authority)
 
 ## Architecture
 
-```
-MahaRERA API
-     │
-     ▼
-┌──────────────────────────────────────┐
-│  Crawler (Go)                        │
-│  ├── Auth (Keycloak JWT, auto-refresh)│
-│  ├── Worker Pool (5 goroutines)      │
-│  ├── Rate Limiting (300ms/worker)    │
-│  ├── Idempotent Upserts             │
-│  └── Change Detection Pipeline      │
-└──────────────┬───────────────────────┘
-               │
-               ▼
-         PostgreSQL
-   ┌─────────────────────┐
-   │  promoters          │
-   │  projects           │
-   │  addresses          │
-   │  contacts           │
-   │  project_snapshots  │
-   │  project_changes    │
-   └─────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────┐
-│  REST API (Go)                       │
-│  ├── server  — HTTP, routing         │
-│  ├── core    — business logic, DTOs  │
-│  └── repo    — SQL queries           │
-└──────────────────────────────────────┘
+See [System Architecture](#system-architecture) diagram below for the full flow.
+
+---
+
+## System Architecture
+
+```mermaid
+flowchart TD
+    A[MahaRERA Public API] --> B[Auth Layer\nKeycloak JWT]
+    B --> C[Crawler]
+    C --> D[Worker Pool\n5 Goroutines]
+    D --> E[Rate Limiter\n300ms / worker]
+    E --> F[Fetch Project Data\n7 parallel API calls]
+    F --> G[Generate MD5 Checksum]
+    G --> H{Snapshot Exists?}
+    H -- Same Checksum --> I[Skip]
+    H -- No Snapshot --> J[Insert Project]
+    H -- Different Checksum --> K[Detect Changes]
+    K --> L[Write project_changes]
+    J --> M[(PostgreSQL)]
+    L --> M
+    M --> N[REST API]
+    N --> O[Search Projects]
+    N --> P[Project Details]
+    N --> Q[Change History]
 ```
 
 ---
 
-## DB Schema
+## Database Schema
+
+InfraLens stores normalized project, promoter, contact and address data while maintaining historical snapshots and field-level change tracking for incremental synchronization.
+
+```mermaid
+erDiagram
+    PROMOTERS {
+        bigint id PK
+        bigint user_profile_id UK
+        string name
+        string pan
+        string gstin
+        string promoter_type
+        timestamp created_at
+    }
+    PROJECTS {
+        bigint id PK
+        bigint maha_id UK
+        bigint promoter_id FK
+        string project_name
+        string project_type
+        string project_status
+        string project_current_status
+        string rera_registration_no
+        date rera_registration_date
+        date proposed_completion_date
+        int total_units
+        int total_sold_units
+        timestamp created_at
+        timestamp updated_at
+    }
+    CONTACTS {
+        bigint id PK
+        bigint project_id FK
+        string role
+        string name
+        string phone
+        string email
+        timestamp created_at
+    }
+    PROJECT_SNAPSHOTS {
+        bigint id PK
+        bigint project_id FK
+        string checksum
+        string raw_json
+        timestamp fetched_at
+    }
+    PROJECT_CHANGES {
+        bigint id PK
+        bigint project_id FK
+        string field_name
+        string old_value
+        string new_value
+        timestamp detected_at
+    }
+    ADDRESSES {
+        bigint id PK
+        string entity_type
+        bigint entity_id
+        string line1
+        string city
+        string district
+        string state
+        string pincode
+        timestamp created_at
+    }
+
+    PROMOTERS ||--o{ PROJECTS : "owns"
+    PROJECTS ||--o{ CONTACTS : "has"
+    PROJECTS ||--o{ PROJECT_SNAPSHOTS : "stores"
+    PROJECTS ||--o{ PROJECT_CHANGES : "generates"
+    PROJECTS ||--o| ADDRESSES : "project address"
+    PROMOTERS ||--o| ADDRESSES : "promoter address"
+```
 
 | Table | Description |
 |---|---|
@@ -66,6 +133,102 @@ MahaRERA API
 | `contacts` | Architects, engineers, agents linked to a project |
 | `project_snapshots` | Full raw JSON + MD5 checksum of every crawl per project |
 | `project_changes` | Field-level change log — `field_name`, `old_value`, `new_value`, `detected_at` |
+
+---
+
+## API in Action
+
+### Search Projects
+
+Filter by any combination of city, district, state, promoter, status, or type. All string filters use case-insensitive partial matching.
+
+```bash
+curl "localhost:8080/api/v1/projects?district=Nagpur&limit=2"
+```
+
+```json
+{
+  "data": [
+    {
+      "id": 26,
+      "maha_id": 19,
+      "rera_registration_no": "P50500001314",
+      "project_name": "Diamond One",
+      "project_type": "Others",
+      "project_status": "New",
+      "project_current_status": "Certificate Signed",
+      "rera_registration_date": "2017-07-27T00:00:00Z",
+      "proposed_completion_date": "2019-12-31T00:00:00Z",
+      "total_units": 0,
+      "total_sold_units": 0,
+      "promoter_name": "Diamond Estate Builders & Developers",
+      "city": "",
+      "district": "Nagpur",
+      "state": "MAHARASHTRA",
+      "pincode": "440010"
+    },
+    {
+      "id": 25,
+      "maha_id": 16,
+      "rera_registration_no": "P50500000348",
+      "project_name": "ROYAL RESIDENCY",
+      "project_type": "Residential / Group Housing",
+      "project_status": "New",
+      "project_current_status": "Certificate Signed",
+      "rera_registration_date": "2017-07-15T00:00:00Z",
+      "proposed_completion_date": "2020-11-30T00:00:00Z",
+      "total_units": 0,
+      "total_sold_units": 0,
+      "promoter_name": "DESIGN DEVELOPERS PRIVATE LIMITED",
+      "city": "",
+      "district": "Nagpur",
+      "state": "MAHARASHTRA",
+      "pincode": "440015"
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "limit": 2,
+    "total": 8
+  }
+}
+```
+
+---
+
+### Change History — The Hero Feature
+
+Every time the crawler detects a field value has changed since the last crawl, it writes a row to `project_changes`. This is what turns a crawler into an intelligence product.
+
+```bash
+curl "localhost:8080/api/v1/projects/2/changes"
+```
+
+```json
+{
+  "data": [
+    {
+      "field_name": "project_status",
+      "old_value": "Under Approval",
+      "new_value": "Ongoing",
+      "detected_at": "2026-06-06T09:33:55Z"
+    },
+    {
+      "field_name": "proposed_completion_date",
+      "old_value": "2024-12-31",
+      "new_value": "2025-06-30",
+      "detected_at": "2026-05-01T02:10:00Z"
+    }
+  ]
+}
+```
+
+Now you can answer questions like:
+- *"Which projects changed status in the last 30 days?"*
+- *"Which builders keep extending completion dates?"*
+- *"How many projects moved from Under Approval to Ongoing this month?"*
+
+This is the data Biltrax sells.
 
 ---
 
