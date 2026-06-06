@@ -196,3 +196,11 @@ type ProjectSnapshot struct {
 	Checksum  string
 	RawJSON   json.RawMessage
 }
+
+type ProjectChange struct {
+	ProjectID  int
+	FieldName  string
+	OldValue   string
+	NewValue   string
+	DetectedAt time.Time
+}

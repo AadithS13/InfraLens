@@ -228,15 +228,80 @@ func (cr *Crawler) crawlOne(ctx context.Context, projectID int) error {
 		_ = cr.store.InsertContacts(ctx, contacts)
 	}
 
-	// Step 7: snapshot (cheap, enables V2 change detection for free)
+	// Step 7: change detection — compare new checksum against latest snapshot
+	now := time.Now()
+	latestSnap, err := cr.store.GetLatestSnapshot(ctx, projectDBID)
+	if err != nil {
+		log.Printf("[WARN] project %d get snapshot: %v", projectID, err)
+	}
+
+	if latestSnap == nil {
+		// First time seeing this project — no diff, just snapshot
+		log.Printf("[NEW]  project %d (%s)", projectID, general.ProjectName)
+	} else if latestSnap.Checksum != checksum {
+		// Something changed — diff field by field
+		var prev model.ProjectGeneral
+		if err := json.Unmarshal(latestSnap.RawJSON, &prev); err != nil {
+			log.Printf("[WARN] project %d unmarshal prev snapshot: %v", projectID, err)
+		} else {
+			changes := diffGeneralFields(projectDBID, &prev, general, now)
+			if len(changes) > 0 {
+				if err := cr.store.InsertProjectChanges(ctx, changes); err != nil {
+					log.Printf("[WARN] project %d insert changes: %v", projectID, err)
+				} else {
+					log.Printf("[DIFF] project %d: %d field(s) changed", projectID, len(changes))
+					for _, c := range changes {
+						log.Printf("       %s: %q → %q", c.FieldName, c.OldValue, c.NewValue)
+					}
+				}
+			}
+		}
+	} else {
+		log.Printf("[SAME] project %d — no changes", projectID)
+	}
+
+	// Always write a new snapshot to track crawl history
 	_ = cr.store.InsertSnapshot(ctx, &model.ProjectSnapshot{
 		ProjectID: projectDBID,
-		FetchedAt: time.Now(),
+		FetchedAt: now,
 		Checksum:  checksum,
 		RawJSON:   generalJSON,
 	})
 
 	return nil
+}
+
+// trackedFields defines which fields we diff on every crawl.
+// Add or remove fields here to control what gets tracked in project_changes.
+var trackedFields = []struct {
+	name string
+	get  func(*model.ProjectGeneral) string
+}{
+	{"project_name", func(p *model.ProjectGeneral) string { return p.ProjectName }},
+	{"project_status", func(p *model.ProjectGeneral) string { return p.ProjectStatusName }},
+	{"project_current_status", func(p *model.ProjectGeneral) string { return p.ProjectCurrentStatus }},
+	{"proposed_completion_date", func(p *model.ProjectGeneral) string { return p.ProjectProposeComplitionDate }},
+	{"total_units", func(p *model.ProjectGeneral) string { return fmt.Sprintf("%d", p.TotalNumberOfUnits) }},
+	{"total_sold_units", func(p *model.ProjectGeneral) string { return fmt.Sprintf("%d", p.TotalNumberOfSoldUnits) }},
+	{"rera_registration_no", func(p *model.ProjectGeneral) string { return p.ProjectRegistrationNo }},
+}
+
+func diffGeneralFields(projectID int, prev, curr *model.ProjectGeneral, at time.Time) []model.ProjectChange {
+	var changes []model.ProjectChange
+	for _, f := range trackedFields {
+		oldVal := f.get(prev)
+		newVal := f.get(curr)
+		if oldVal != newVal {
+			changes = append(changes, model.ProjectChange{
+				ProjectID:  projectID,
+				FieldName:  f.name,
+				OldValue:   oldVal,
+				NewValue:   newVal,
+				DetectedAt: at,
+			})
+		}
+	}
+	return changes
 }
 
 func buildProject(g *model.ProjectGeneral, promoterID *int, rawJSON []byte) *model.Project {

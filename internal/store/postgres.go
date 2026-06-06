@@ -130,3 +130,40 @@ func (s *Store) SnapshotExists(ctx context.Context, projectID int, checksum stri
 	).Scan(&exists)
 	return exists, err
 }
+
+// GetLatestSnapshot returns the most recent snapshot for a project, or nil if none exists.
+func (s *Store) GetLatestSnapshot(ctx context.Context, projectID int) (*model.ProjectSnapshot, error) {
+	var snap model.ProjectSnapshot
+	err := s.db.QueryRow(ctx, `
+		SELECT id, project_id, fetched_at, checksum, raw_json
+		FROM project_snapshots
+		WHERE project_id = $1
+		ORDER BY fetched_at DESC
+		LIMIT 1`,
+		projectID,
+	).Scan(&snap.ID, &snap.ProjectID, &snap.FetchedAt, &snap.Checksum, &snap.RawJSON)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &snap, nil
+}
+
+// InsertProjectChanges batch-inserts detected field-level changes.
+func (s *Store) InsertProjectChanges(ctx context.Context, changes []model.ProjectChange) error {
+	if len(changes) == 0 {
+		return nil
+	}
+	rows := make([][]any, len(changes))
+	for i, c := range changes {
+		rows[i] = []any{c.ProjectID, c.FieldName, c.OldValue, c.NewValue, c.DetectedAt}
+	}
+	_, err := s.db.CopyFrom(ctx,
+		pgx.Identifier{"project_changes"},
+		[]string{"project_id", "field_name", "old_value", "new_value", "detected_at"},
+		pgx.CopyFromRows(rows),
+	)
+	return err
+}
