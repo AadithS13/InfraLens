@@ -154,45 +154,17 @@ The API server embeds a cron scheduler (`robfig/cron`) that automatically trigge
 
 ### Scheduler log output
 
-```
-2026/06/07 09:57:01 [SCHEDULER] started, schedule="@every 1m" (IDs 1→10)
-2026/06/07 09:57:01 server listening on :8080
-2026/06/07 09:58:01 [SCHEDULER] crawl_run 1 started (IDs 1→10)
-2026/06/07 09:58:02 [SAME] project 3 — no changes
-2026/06/07 09:58:02 [OK]   project 3 (total: 1)
-2026/06/07 09:58:02 [SAME] project 2 — no changes
-2026/06/07 09:58:02 [OK]   project 2 (total: 2)
-2026/06/07 09:58:02 [SAME] project 1 — no changes
-2026/06/07 09:58:02 [OK]   project 1 (total: 3)
-...
-2026/06/07 09:58:05 Done. processed=10 failed=0
-2026/06/07 09:58:05 [SCHEDULER] crawl_run 1 done: status=completed processed=10 failed=0
-```
+The scheduler fires automatically, authenticates with MahaRERA, and processes each project through the full change-detection pipeline:
+
+![Scheduler terminal output](docs/screenshots/crawler_terminal.png)
 
 ### `GET /api/v1/crawls` — live proof
 
-```bash
-curl "localhost:8080/api/v1/crawls"
-```
+Every run is recorded in `crawl_runs` and accessible via the API. After running for a few minutes with `@every 1m`, the history shows all completed runs with timestamps and counts:
 
-```json
-{
-  "data": [
-    {
-      "id": 1,
-      "started_at": "2026-06-07T09:58:01.006191+05:30",
-      "finished_at": "2026-06-07T09:58:05.030911+05:30",
-      "status": "completed",
-      "start_id": 1,
-      "end_id": 10,
-      "processed": 10,
-      "failed": 0
-    }
-  ]
-}
-```
+![GET /api/v1/crawls response](docs/screenshots/crawler_browser.png)
 
-Crawl run 1 processed 10 projects in ~4 seconds with zero failures. The `status` field is `completed_with_errors` if any projects failed, or `failed` if the run could not start.
+Each run processed 10 projects in ~3 seconds with zero failures. The `status` field is `completed_with_errors` if any projects failed, or `failed` if the run could not start.
 
 ### Configuring the schedule
 
