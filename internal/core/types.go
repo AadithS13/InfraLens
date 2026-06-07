@@ -84,6 +84,18 @@ type ChangeItem struct {
 	DetectedAt time.Time `json:"detected_at"`
 }
 
+type CrawlRunItem struct {
+	ID         int        `json:"id"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at"`
+	Status     string     `json:"status"`
+	StartID    int        `json:"start_id"`
+	EndID      int        `json:"end_id"`
+	Processed  int        `json:"processed"`
+	Failed     int        `json:"failed"`
+	Error      *string    `json:"error,omitempty"`
+}
+
 // --- Generic list response ---
 
 type Meta struct {

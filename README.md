@@ -42,10 +42,15 @@ flowchart TD
     K --> L[Write project_changes]
     J --> M[(PostgreSQL)]
     L --> M
+    SCHED[Scheduler\nrobfig/cron] -- triggers --> CR[Create crawl_run record]
+    CR --> C
+    C -- processed / failed counts --> UPD[Update crawl_run status]
+    UPD --> M
     M --> N[REST API]
     N --> O[Search Projects]
     N --> P[Project Details]
     N --> Q[Change History]
+    N --> R[Crawl Run History]
 ```
 
 ---
@@ -133,6 +138,74 @@ erDiagram
 | `contacts` | Architects, engineers, agents linked to a project |
 | `project_snapshots` | Full raw JSON + MD5 checksum of every crawl per project |
 | `project_changes` | Field-level change log — `field_name`, `old_value`, `new_value`, `detected_at` |
+| `crawl_runs` | Audit log of every scheduled crawl — status, duration, processed/failed counts |
+
+---
+
+## Scheduled Crawling
+
+The API server embeds a cron scheduler (`robfig/cron`) that automatically triggers full crawls on a configurable schedule. Every run is recorded in the `crawl_runs` table and exposed via `GET /api/v1/crawls`.
+
+### How it works
+
+1. On server startup, the scheduler registers a cron job and authenticates with MahaRERA
+2. On each tick: creates a `crawl_run` record (`status=running`), runs the full worker-pool crawler, then updates the record with final stats
+3. Token auto-refresh is handled transparently — the crawler re-authenticates before expiry
+
+### Scheduler log output
+
+```
+2026/06/07 09:57:01 [SCHEDULER] started, schedule="@every 1m" (IDs 1→10)
+2026/06/07 09:57:01 server listening on :8080
+2026/06/07 09:58:01 [SCHEDULER] crawl_run 1 started (IDs 1→10)
+2026/06/07 09:58:02 [SAME] project 3 — no changes
+2026/06/07 09:58:02 [OK]   project 3 (total: 1)
+2026/06/07 09:58:02 [SAME] project 2 — no changes
+2026/06/07 09:58:02 [OK]   project 2 (total: 2)
+2026/06/07 09:58:02 [SAME] project 1 — no changes
+2026/06/07 09:58:02 [OK]   project 1 (total: 3)
+...
+2026/06/07 09:58:05 Done. processed=10 failed=0
+2026/06/07 09:58:05 [SCHEDULER] crawl_run 1 done: status=completed processed=10 failed=0
+```
+
+### `GET /api/v1/crawls` — live proof
+
+```bash
+curl "localhost:8080/api/v1/crawls"
+```
+
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "started_at": "2026-06-07T09:58:01.006191+05:30",
+      "finished_at": "2026-06-07T09:58:05.030911+05:30",
+      "status": "completed",
+      "start_id": 1,
+      "end_id": 10,
+      "processed": 10,
+      "failed": 0
+    }
+  ]
+}
+```
+
+Crawl run 1 processed 10 projects in ~4 seconds with zero failures. The `status` field is `completed_with_errors` if any projects failed, or `failed` if the run could not start.
+
+### Configuring the schedule
+
+```bash
+# Default: every night at 2am
+DATABASE_URL="..." PORT=8080 go run ./cmd/api/
+
+# Custom: every hour
+DATABASE_URL="..." CRAWL_SCHEDULE="0 * * * *" START_ID=1 END_ID=50000 PORT=8080 go run ./cmd/api/
+
+# Testing: every minute
+DATABASE_URL="..." CRAWL_SCHEDULE="@every 1m" START_ID=1 END_ID=10 PORT=8080 go run ./cmd/api/
+```
 
 ---
 
@@ -297,6 +370,7 @@ ORDER BY changes DESC;
 | `GET` | `/api/v1/projects` | Search projects with filters and pagination |
 | `GET` | `/api/v1/projects/{id}` | Full project detail — promoter, addresses, contacts |
 | `GET` | `/api/v1/projects/{id}/changes` | Field-level change history for a project |
+| `GET` | `/api/v1/crawls` | Scheduled crawl run history — status, counts, duration |
 | `GET` | `/health` | Health check |
 
 ### Query Parameters — `GET /api/v1/projects`
@@ -398,7 +472,7 @@ PostgreSQL
 | **V1** | Data ingestion — crawl MahaRERA, normalize, store | ✅ Done |
 | **V2** | Idempotent crawling — checksum comparison, field-level change detection | ✅ Done |
 | **V3** | Search API — layered REST API with filters, pagination, change history | ✅ Done |
-| **V4** | Scheduled crawling — nightly cron, `crawl_runs` tracking, retries | 🔜 Next |
+| **V4** | Scheduled crawling — nightly cron, `crawl_runs` tracking, `GET /api/v1/crawls` | ✅ Done |
 | **V5** | Notifications — email/webhook on status changes or new registrations | 🔜 |
 | **V6** | Duplicate detection — trigram similarity + Levenshtein for project name dedup | 🔜 |
 
@@ -408,6 +482,7 @@ PostgreSQL
 
 - **Go 1.23** — crawler, HTTP client, worker pool, REST API
 - **chi** — lightweight HTTP router
+- **robfig/cron v3** — embedded cron scheduler
 - **PostgreSQL 16** — primary store
 - **Docker** — local Postgres via docker-compose
 
@@ -461,6 +536,9 @@ DATABASE_URL="postgres://infralens:infralens@127.0.0.1:5433/infralens?sslmode=di
 |---|---|---|
 | `DATABASE_URL` | `postgres://infralens:infralens@localhost:5433/infralens?sslmode=disable` | Postgres DSN |
 | `PORT` | `8080` | HTTP port |
+| `CRAWL_SCHEDULE` | `0 2 * * *` | Cron expression for scheduled crawls (daily at 2am). Use `@every 1m` for testing |
+| `START_ID` | `1` | First MahaRERA project ID the scheduler will crawl |
+| `END_ID` | `100000` | Last MahaRERA project ID the scheduler will crawl |
 
 ---
 
@@ -491,7 +569,8 @@ Migration files follow Goose-style timestamp naming:
 ```
 migrations/
 ├── 20260606135000_InfraLens_Create_Schema.sql      # Core tables
-└── 20260606135001_InfraLens_Add_ProjectChanges.sql # Change detection table
+├── 20260606135001_InfraLens_Add_ProjectChanges.sql # Change detection table
+└── 20260607000000_InfraLens_Add_CrawlRuns.sql      # Scheduler audit log
 ```
 
 ---
@@ -514,15 +593,18 @@ InfraLens/
 │   │   └── postgres.go          # Crawler write layer (upserts, snapshots, changes)
 │   ├── crawler/
 │   │   └── crawler.go           # Worker pool, orchestration, diff logic
+│   ├── scheduler/
+│   │   └── scheduler.go         # robfig/cron wrapper, crawl_run lifecycle
 │   ├── repo/
-│   │   └── project.go           # API read layer (search, detail, changes)
+│   │   └── project.go           # API read layer (search, detail, changes, crawl runs)
 │   ├── core/
 │   │   ├── project.go           # ProjectService — business logic
-│   │   └── types.go             # DTOs, SearchFilter, ListResponse
+│   │   └── types.go             # DTOs, SearchFilter, ListResponse, CrawlRunItem
 │   └── server/
 │       ├── server.go            # chi router, middleware, graceful shutdown
 │       └── handler/
-│           └── project.go       # HTTP handlers
+│           ├── project.go       # HTTP handlers — List, Get, Changes
+│           └── crawl.go         # HTTP handler — crawl run history
 ├── migrations/
 └── docker-compose.yml
 ```

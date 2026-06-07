@@ -166,6 +166,30 @@ func (r *ProjectRepo) getContacts(ctx context.Context, projectID int) ([]core.Co
 	return contacts, rows.Err()
 }
 
+// ListCrawlRuns returns recent crawl runs, most recent first.
+func (r *ProjectRepo) ListCrawlRuns(ctx context.Context, limit int) ([]core.CrawlRunItem, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, started_at, finished_at, status, start_id, end_id, processed, failed, error
+		FROM crawl_runs
+		ORDER BY started_at DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var runs []core.CrawlRunItem
+	for rows.Next() {
+		var r core.CrawlRunItem
+		if err := rows.Scan(&r.ID, &r.StartedAt, &r.FinishedAt, &r.Status,
+			&r.StartID, &r.EndID, &r.Processed, &r.Failed, &r.Error); err != nil {
+			return nil, err
+		}
+		runs = append(runs, r)
+	}
+	return runs, rows.Err()
+}
+
 // GetChanges returns the change history for a project, most recent first.
 func (r *ProjectRepo) GetChanges(ctx context.Context, projectID int) ([]core.ChangeItem, error) {
 	rows, err := r.db.Query(ctx, `

@@ -37,7 +37,8 @@ func main() {
 	log.Printf("crawling project IDs %d → %d", startID, endID)
 
 	cr := crawler.New(c, db)
-	cr.Run(ctx, startID, endID)
+	processed, failed := cr.Run(ctx, startID, endID)
+	log.Printf("crawl complete: processed=%d failed=%d", processed, failed)
 }
 
 func intEnv(key string, def int) int {

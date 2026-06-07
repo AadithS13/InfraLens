@@ -11,6 +11,7 @@ type ProjectRepo interface {
 	Search(ctx context.Context, f SearchFilter) ([]ProjectListItem, int, error)
 	GetByID(ctx context.Context, id int) (*ProjectDetail, error)
 	GetChanges(ctx context.Context, projectID int) ([]ChangeItem, error)
+	ListCrawlRuns(ctx context.Context, limit int) ([]CrawlRunItem, error)
 }
 
 type ProjectService struct {
@@ -60,4 +61,18 @@ func (s *ProjectService) GetChanges(ctx context.Context, projectID int) ([]Chang
 		changes = []ChangeItem{}
 	}
 	return changes, nil
+}
+
+func (s *ProjectService) ListCrawlRuns(ctx context.Context, limit int) ([]CrawlRunItem, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	runs, err := s.repo.ListCrawlRuns(ctx, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list crawl runs: %w", err)
+	}
+	if runs == nil {
+		runs = []CrawlRunItem{}
+	}
+	return runs, nil
 }

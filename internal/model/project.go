@@ -204,3 +204,15 @@ type ProjectChange struct {
 	NewValue   string
 	DetectedAt time.Time
 }
+
+type CrawlRun struct {
+	ID          int
+	StartedAt   time.Time
+	FinishedAt  *time.Time
+	Status      string
+	StartID     int
+	EndID       int
+	Processed   int
+	Failed      int
+	Error       *string
+}

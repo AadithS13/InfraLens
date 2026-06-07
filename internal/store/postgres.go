@@ -151,6 +151,60 @@ func (s *Store) GetLatestSnapshot(ctx context.Context, projectID int) (*model.Pr
 	return &snap, nil
 }
 
+// InsertCrawlRun creates a new crawl_run record and returns its ID.
+func (s *Store) InsertCrawlRun(ctx context.Context, startID, endID int) (int, error) {
+	var id int
+	err := s.db.QueryRow(ctx, `
+		INSERT INTO crawl_runs (start_id, end_id)
+		VALUES ($1, $2)
+		RETURNING id`,
+		startID, endID,
+	).Scan(&id)
+	return id, err
+}
+
+// UpdateCrawlRun marks a crawl run as finished with final stats.
+func (s *Store) UpdateCrawlRun(ctx context.Context, id, processed, failed int, status string, crawlErr error) error {
+	var errMsg *string
+	if crawlErr != nil {
+		msg := crawlErr.Error()
+		errMsg = &msg
+	}
+	_, err := s.db.Exec(ctx, `
+		UPDATE crawl_runs
+		SET finished_at = NOW(), status = $2, processed = $3, failed = $4, error = $5
+		WHERE id = $1`,
+		id, status, processed, failed, errMsg,
+	)
+	return err
+}
+
+// ListCrawlRuns returns the most recent crawl runs.
+func (s *Store) ListCrawlRuns(ctx context.Context, limit int) ([]model.CrawlRun, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT id, started_at, finished_at, status, start_id, end_id, processed, failed, error
+		FROM crawl_runs
+		ORDER BY started_at DESC
+		LIMIT $1`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var runs []model.CrawlRun
+	for rows.Next() {
+		var r model.CrawlRun
+		if err := rows.Scan(&r.ID, &r.StartedAt, &r.FinishedAt, &r.Status,
+			&r.StartID, &r.EndID, &r.Processed, &r.Failed, &r.Error); err != nil {
+			return nil, err
+		}
+		runs = append(runs, r)
+	}
+	return runs, rows.Err()
+}
+
 // InsertProjectChanges batch-inserts detected field-level changes.
 func (s *Store) InsertProjectChanges(ctx context.Context, changes []model.ProjectChange) error {
 	if len(changes) == 0 {

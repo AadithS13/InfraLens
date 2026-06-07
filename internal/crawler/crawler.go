@@ -30,10 +30,10 @@ func New(c *client.Client, s *store.Store) *Crawler {
 	return &Crawler{client: c, store: s}
 }
 
-func (cr *Crawler) Run(ctx context.Context, startID, endID int) {
+func (cr *Crawler) Run(ctx context.Context, startID, endID int) (processed int, failed int) {
 	jobs := make(chan int, workers*2)
 	var wg sync.WaitGroup
-	var processed, failed atomic.Int64
+	var processedAtomic, failedAtomic atomic.Int64
 
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -45,11 +45,11 @@ func (cr *Crawler) Run(ctx context.Context, startID, endID int) {
 						log.Printf("[SKIP] project %d: not found", projectID)
 					} else {
 						log.Printf("[ERR]  project %d: %v", projectID, err)
-						failed.Add(1)
+						failedAtomic.Add(1)
 					}
 				} else {
-					processed.Add(1)
-					log.Printf("[OK]   project %d (total: %d)", projectID, processed.Load())
+					processedAtomic.Add(1)
+					log.Printf("[OK]   project %d (total: %d)", projectID, processedAtomic.Load())
 				}
 				time.Sleep(rateDelay)
 			}
@@ -66,7 +66,10 @@ func (cr *Crawler) Run(ctx context.Context, startID, endID int) {
 	close(jobs)
 	wg.Wait()
 
-	log.Printf("Done. processed=%d failed=%d", processed.Load(), failed.Load())
+	processed = int(processedAtomic.Load())
+	failed = int(failedAtomic.Load())
+	log.Printf("Done. processed=%d failed=%d", processed, failed)
+	return
 }
 
 func (cr *Crawler) crawlOne(ctx context.Context, projectID int) error {
