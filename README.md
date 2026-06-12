@@ -271,6 +271,72 @@ If neither is set, only the `LogAdapter` runs — terminal output as in Phase 1.
 
 ---
 
+## Search Intelligence (V6)
+
+Full-text search across project names, promoter names, and districts — powered by PostgreSQL's `pg_trgm` extension. Results are ranked by relevance score so the most likely matches always appear first.
+
+### `GET /api/v1/projects?q=<term>` — relevance-ranked search
+
+Add `?q=` to any project list query. The engine computes `word_similarity()` against project name, promoter name, and district simultaneously. Results include a `relevance` score (0–1) so you can see how well each result matched.
+
+```bash
+# Find all projects matching "pramukh" — fuzzy, case-insensitive
+curl "localhost:8080/api/v1/projects?q=pramukh&limit=3"
+```
+
+```json
+{
+  "data": [
+    {
+      "id": 18,
+      "project_name": "Pramukh Sneh Phase 2",
+      "promoter_name": "Pramukh Realty",
+      "district": "Dadra & Nagar Haveli",
+      "project_status": "Ongoing",
+      "relevance": 1
+    },
+    {
+      "id": 28,
+      "project_name": "PRAMUKH GARDENS PHASE 2",
+      "promoter_name": "PRASHANT DEVELOPERS PVT LTD",
+      "district": "Dadra & Nagar Haveli",
+      "project_status": "Ongoing",
+      "relevance": 1
+    }
+  ],
+  "meta": { "page": 1, "limit": 3, "total": 3 }
+}
+```
+
+Composable with all existing filters — `?q=prestige&district=pune&status=Ongoing` works exactly as expected.
+
+![Search with ?q= — ranked results in browser](docs/screenshots/search_q_browser.png)
+
+---
+
+### `GET /api/v1/search/suggestions?q=<term>` — autocomplete
+
+Returns ranked project names and promoter names for a partial query. Built for typeahead UI — minimum 2 characters, max 20 results. Each suggestion carries a `type` (`"project"` or `"promoter"`) and a `score`.
+
+```bash
+curl "localhost:8080/api/v1/search/suggestions?q=pramukh"
+```
+
+```json
+{
+  "data": [
+    { "text": "Pramukh Realty",       "type": "promoter", "score": 1 },
+    { "text": "Pramukh Sneh Phase 2", "type": "project",  "score": 1 },
+    { "text": "PRAMUKH GARDENS PHASE 2", "type": "project", "score": 1 },
+    { "text": "PRASHANT DEVELOPERS PVT LTD", "type": "promoter", "score": 0.375 }
+  ]
+}
+```
+
+![Suggestions endpoint — terminal + browser](docs/screenshots/search_suggestions_browser.png)
+
+---
+
 ## Analytics API
 
 Three read-only aggregation endpoints over the projects dataset. No query parameters needed — results are pre-grouped and sorted by count descending.
@@ -487,19 +553,21 @@ ORDER BY changes DESC;
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/projects` | Search projects with filters and pagination |
+| `GET` | `/api/v1/projects` | Search projects with filters, pagination, and `?q=` relevance ranking |
 | `GET` | `/api/v1/projects/{id}` | Full project detail — promoter, addresses, contacts |
 | `GET` | `/api/v1/projects/{id}/changes` | Field-level change history for a project |
 | `GET` | `/api/v1/crawls` | Scheduled crawl run history — status, counts, duration |
 | `GET` | `/api/v1/analytics/status-distribution` | Project counts grouped by status |
 | `GET` | `/api/v1/analytics/top-builders` | Top promoters by project count + total units |
 | `GET` | `/api/v1/analytics/by-district` | Project counts grouped by district |
+| `GET` | `/api/v1/search/suggestions` | Autocomplete — ranked project + promoter names for `?q=` |
 | `GET` | `/health` | Health check |
 
 ### Query Parameters — `GET /api/v1/projects`
 
 | Param | Type | Description |
 |---|---|---|
+| `q` | string | **Full-text search** — ranked by `word_similarity` across project name, promoter, and district. Results include a `relevance` score. |
 | `city` | string | Partial match on project city |
 | `district` | string | Partial match on district |
 | `state` | string | Partial match on state |
@@ -512,6 +580,15 @@ ORDER BY changes DESC;
 ### Example Requests
 
 ```bash
+# Full-text search — ranked by relevance
+GET /api/v1/projects?q=pramukh
+
+# Fuzzy search combined with a filter
+GET /api/v1/projects?q=prestige&district=pune&status=Ongoing
+
+# Autocomplete for a search input
+GET /api/v1/search/suggestions?q=pram&limit=5
+
 # All projects in Nagpur
 GET /api/v1/projects?district=Nagpur
 
@@ -610,9 +687,9 @@ PostgreSQL
 
 | Feature | Status |
 |---|---|
-| Full-text search — `?q=prestige nagpur` across project + promoter fields | 🔜 |
-| Relevance ranking — `pg_trgm` similarity scoring | 🔜 |
-| Query suggestions — top matching terms as you type | 🔜 |
+| Full-text search — `?q=prestige nagpur` across project + promoter fields | ✅ Done |
+| Relevance ranking — `pg_trgm` similarity scoring | ✅ Done |
+| Query suggestions — autocomplete across project + promoter names | ✅ Done |
 
 **V7 — AI Intelligence Layer**
 
