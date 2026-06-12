@@ -18,7 +18,7 @@ type Server struct {
 	port   string
 }
 
-func New(projectHandler *handler.ProjectHandler, crawlHandler *handler.CrawlHandler, analyticsHandler *handler.AnalyticsHandler, port string) *Server {
+func New(projectHandler *handler.ProjectHandler, crawlHandler *handler.CrawlHandler, analyticsHandler *handler.AnalyticsHandler, searchHandler *handler.SearchHandler, port string) *Server {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -38,6 +38,9 @@ func New(projectHandler *handler.ProjectHandler, crawlHandler *handler.CrawlHand
 			r.Get("/status-distribution", analyticsHandler.StatusDistribution)
 			r.Get("/top-builders", analyticsHandler.TopBuilders)
 			r.Get("/by-district", analyticsHandler.ByDistrict)
+		})
+		r.Route("/search", func(r chi.Router) {
+			r.Get("/suggestions", searchHandler.Suggestions)
 		})
 	})
 

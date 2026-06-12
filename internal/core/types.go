@@ -5,6 +5,7 @@ import "time"
 // --- Request types ---
 
 type SearchFilter struct {
+	Q        *string // full-text query — ranked by word_similarity when set
 	City     *string
 	District *string
 	State    *string
@@ -41,6 +42,14 @@ type ProjectListItem struct {
 	District             string     `json:"district"`
 	State                string     `json:"state"`
 	Pincode              string     `json:"pincode"`
+	Relevance            *float64   `json:"relevance,omitempty"` // set only when ?q= is used
+}
+
+// SuggestionItem is a single autocomplete result from GET /api/v1/search/suggestions.
+type SuggestionItem struct {
+	Text  string  `json:"text"`
+	Type  string  `json:"type"`  // "project" | "promoter"
+	Score float64 `json:"score"` // word_similarity score 0–1
 }
 
 type ProjectAddress struct {

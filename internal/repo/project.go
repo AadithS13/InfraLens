@@ -30,6 +30,9 @@ func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 }
 
 // Search returns a paginated list of projects matching the given filters.
+// When f.Q is set, results are ranked by word_similarity (pg_trgm) across
+// project name, promoter name, and district. Each result includes a relevance
+// score (0–1) so the caller can show how well each result matched.
 func (r *ProjectRepo) Search(ctx context.Context, f core.SearchFilter) ([]core.ProjectListItem, int, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT
@@ -43,7 +46,14 @@ func (r *ProjectRepo) Search(ctx context.Context, f core.SearchFilter) ([]core.P
 			COALESCE(a.district, '') AS district,
 			COALESCE(a.state, '')    AS state,
 			COALESCE(a.pincode, '')  AS pincode,
-			COUNT(*) OVER()          AS total_count
+			CASE WHEN $9::text IS NULL THEN 0::float8 ELSE
+				GREATEST(
+					word_similarity($9, COALESCE(p.project_name, '')),
+					word_similarity($9, COALESCE(pr.name, '')),
+					word_similarity($9, COALESCE(a.district, ''))
+				)
+			END AS relevance,
+			COUNT(*) OVER() AS total_count
 		FROM projects p
 		LEFT JOIN promoters pr ON p.promoter_id = pr.id
 		LEFT JOIN addresses a  ON a.entity_type = 'project' AND a.entity_id = p.id
@@ -53,10 +63,15 @@ func (r *ProjectRepo) Search(ctx context.Context, f core.SearchFilter) ([]core.P
 		  AND ($4::text IS NULL OR pr.name    ILIKE '%' || $4 || '%')
 		  AND ($5::text IS NULL OR p.project_status ILIKE $5)
 		  AND ($6::text IS NULL OR p.project_type   ILIKE '%' || $6 || '%')
-		ORDER BY p.id DESC
+		  AND ($9::text IS NULL OR (
+		      word_similarity($9, COALESCE(p.project_name, '')) > 0.1
+		      OR word_similarity($9, COALESCE(pr.name, ''))      > 0.1
+		      OR word_similarity($9, COALESCE(a.district, ''))   > 0.1
+		  ))
+		ORDER BY relevance DESC, p.id DESC
 		LIMIT $7 OFFSET $8`,
 		f.City, f.District, f.State, f.Promoter, f.Status, f.Type,
-		f.Limit, f.Offset(),
+		f.Limit, f.Offset(), f.Q,
 	)
 	if err != nil {
 		return nil, 0, err
@@ -68,20 +83,72 @@ func (r *ProjectRepo) Search(ctx context.Context, f core.SearchFilter) ([]core.P
 		total int
 	)
 	for rows.Next() {
-		var item core.ProjectListItem
+		var (
+			item      core.ProjectListItem
+			relevance float64
+		)
 		if err := rows.Scan(
 			&item.ID, &item.MahaID, &item.ReraRegistrationNo, &item.ProjectName,
 			&item.ProjectType, &item.ProjectStatus, &item.ProjectCurrentStatus,
 			&item.ReraRegistrationDate, &item.ProposedCompletion,
 			&item.TotalUnits, &item.TotalSoldUnits,
 			&item.PromoterName, &item.City, &item.District, &item.State, &item.Pincode,
+			&relevance,
 			&total,
 		); err != nil {
 			return nil, 0, err
 		}
+		if relevance > 0 {
+			item.Relevance = &relevance
+		}
 		items = append(items, item)
 	}
 	return items, total, rows.Err()
+}
+
+// Suggestions returns autocomplete results for a partial query.
+// Returns ranked project names and promoter names using word_similarity.
+func (r *ProjectRepo) Suggestions(ctx context.Context, q string, limit int) ([]core.SuggestionItem, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT text, type, score FROM (
+			(
+				SELECT p.project_name AS text, 'project' AS type,
+				       word_similarity($1, p.project_name) AS score
+				FROM projects p
+				WHERE p.project_name IS NOT NULL
+				  AND word_similarity($1, p.project_name) > 0.15
+				ORDER BY score DESC
+				LIMIT 8
+			)
+			UNION
+			(
+				SELECT pr.name AS text, 'promoter' AS type,
+				       word_similarity($1, pr.name) AS score
+				FROM promoters pr
+				WHERE pr.name IS NOT NULL
+				  AND word_similarity($1, pr.name) > 0.15
+				ORDER BY score DESC
+				LIMIT 8
+			)
+		) sub
+		ORDER BY score DESC
+		LIMIT $2`,
+		q, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []core.SuggestionItem
+	for rows.Next() {
+		var item core.SuggestionItem
+		if err := rows.Scan(&item.Text, &item.Type, &item.Score); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 // GetByID returns full project detail including promoter, addresses, and contacts.

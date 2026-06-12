@@ -21,6 +21,7 @@ func NewProjectHandler(svc *core.ProjectService) *ProjectHandler {
 // List handles GET /api/v1/projects
 func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 	f := core.SearchFilter{
+		Q:        queryParam(r, "q"),
 		City:     queryParam(r, "city"),
 		District: queryParam(r, "district"),
 		State:    queryParam(r, "state"),

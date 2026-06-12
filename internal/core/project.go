@@ -15,6 +15,7 @@ type ProjectRepo interface {
 	StatusDistribution(ctx context.Context) ([]StatusDistributionItem, error)
 	TopBuilders(ctx context.Context, limit int) ([]TopBuilderItem, error)
 	ByDistrict(ctx context.Context, limit int) ([]DistrictCountItem, error)
+	Suggestions(ctx context.Context, q string, limit int) ([]SuggestionItem, error)
 }
 
 type ProjectService struct {
@@ -115,6 +116,22 @@ func (s *ProjectService) ByDistrict(ctx context.Context, limit int) ([]DistrictC
 	}
 	if items == nil {
 		items = []DistrictCountItem{}
+	}
+	return items, nil
+}
+
+// Suggestions returns autocomplete results for a query string.
+// Matches project names and promoter names using pg_trgm word_similarity.
+func (s *ProjectService) Suggestions(ctx context.Context, q string, limit int) ([]SuggestionItem, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 10
+	}
+	items, err := s.repo.Suggestions(ctx, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("suggestions: %w", err)
+	}
+	if items == nil {
+		items = []SuggestionItem{}
 	}
 	return items, nil
 }
