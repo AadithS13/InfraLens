@@ -224,31 +224,46 @@ Most field changes are noise. Only three fields have direct business value:
 | `project_current_status` | Tracks internal approval milestones |
 | `proposed_completion_date` | A date pushed forward means a builder is slipping |
 
-### Phase 1 — Terminal output (live)
+### Phase 1 — Terminal output
 
-![Notifier output](docs/screenshots/notifier_output.png)
+The notifier fires immediately after each crawl completes. Changes detected in the same run are dispatched together in one batch:
 
-The notifier fires immediately after each crawl completes. Two changes detected in the same run are dispatched together in one batch.
+![Notifier terminal output](docs/screenshots/notifier_terminal.png)
 
-### Phase 2 — Email / Webhook (roadmap)
+### Phase 2 — Email delivery (live)
 
+The `EmailAdapter` sends via SMTP (port 587 / STARTTLS). Tested with Mailtrap — email arrives with project name, field label, old → new values, and timestamp:
+
+![Notifier email in Mailtrap](docs/screenshots/notifier_email.png)
+
+### Phase 2 — Webhook delivery (live)
+
+The `WebhookAdapter` POSTs a JSON payload to any endpoint. Tested with webhook.site — the full payload arrives instantly with `InfraLens-Notifier/1.0` user-agent:
+
+![Notifier webhook on webhook.site](docs/screenshots/notifier_webhook.png)
+
+All three adapters can run simultaneously. A failed adapter logs a warning but never blocks the others or causes a double-notify.
+
+### Configuring delivery adapters
+
+```bash
+# Email only (Gmail, Mailtrap, any SMTP)
+SMTP_HOST=sandbox.smtp.mailtrap.io \
+SMTP_PORT=587 \
+SMTP_USER=<user> \
+SMTP_PASS=<pass> \
+NOTIFY_EMAIL_FROM=infralens@notify.com \
+NOTIFY_EMAIL_TO=you@example.com \
+go run ./cmd/api/
+
+# Webhook only (Slack, n8n, custom endpoint)
+NOTIFY_WEBHOOK_URL=https://hooks.slack.com/... go run ./cmd/api/
+
+# Both at once
+SMTP_HOST=... NOTIFY_WEBHOOK_URL=... go run ./cmd/api/
 ```
-Scheduler
-    ↓
-Crawler
-    ↓
-Snapshots
-    ↓
-Diff Engine
-    ↓
-project_changes
-    ↓
-Notification Engine
-    ↓
-Email / Webhook / Slack
-```
 
-Phase 2 replaces the `logChange()` call with delivery adapters — one for email (SMTP), one for webhooks (HTTP POST). The engine logic stays identical; only the delivery layer changes.
+If neither is set, only the `LogAdapter` runs — terminal output as in Phase 1.
 
 ---
 
@@ -579,7 +594,7 @@ PostgreSQL
 | **V4** | Scheduled crawling — nightly cron, `crawl_runs` tracking, `GET /api/v1/crawls` | ✅ Done |
 | **V4.5** | Analytics API — status distribution, top builders, by-district aggregations | ✅ Done |
 | **V5 Phase 1** | Notification engine — detect unsent changes, log `[NOTIFY]` blocks, mark notified | ✅ Done |
-| **V5 Phase 2** | Email + webhook delivery adapters for notifications | 🔜 Next |
+| **V5 Phase 2** | Email (SMTP) + webhook delivery adapters — pluggable `Adapter` interface | ✅ Done |
 | **V6** | Search ranking — `pg_trgm` similarity scoring for `?q=prestige nagpur` | 🔜 |
 
 ---
@@ -645,6 +660,13 @@ DATABASE_URL="postgres://infralens:infralens@127.0.0.1:5433/infralens?sslmode=di
 | `CRAWL_SCHEDULE` | `0 2 * * *` | Cron expression for scheduled crawls (daily at 2am). Use `@every 1m` for testing |
 | `START_ID` | `1` | First MahaRERA project ID the scheduler will crawl |
 | `END_ID` | `100000` | Last MahaRERA project ID the scheduler will crawl |
+| `SMTP_HOST` | — | SMTP host (e.g. `sandbox.smtp.mailtrap.io`, `smtp.gmail.com`) |
+| `SMTP_PORT` | `587` | SMTP port |
+| `SMTP_USER` | — | SMTP auth username |
+| `SMTP_PASS` | — | SMTP auth password / app password |
+| `NOTIFY_EMAIL_FROM` | `SMTP_USER` | From address shown in the email |
+| `NOTIFY_EMAIL_TO` | — | Comma-separated recipient list. Email adapter activates when set |
+| `NOTIFY_WEBHOOK_URL` | — | HTTP POST endpoint for webhook notifications. Adapter activates when set |
 
 ---
 
