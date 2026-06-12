@@ -271,7 +271,7 @@ If neither is set, only the `LogAdapter` runs — terminal output as in Phase 1.
 
 ---
 
-## Search Intelligence (V6)
+## Search & Discovery (V6)
 
 Full-text search across project names, promoter names, and districts — powered by PostgreSQL's `pg_trgm` extension. Results are ranked by relevance score so the most likely matches always appear first.
 
@@ -683,7 +683,7 @@ PostgreSQL
 | Email notifications — SMTP delivery via pluggable `EmailAdapter` | ✅ Done |
 | Webhook notifications — HTTP POST JSON via pluggable `WebhookAdapter` | ✅ Done |
 
-**V6 — Search Intelligence**
+**V6 — Search & Discovery**
 
 | Feature | Status |
 |---|---|
