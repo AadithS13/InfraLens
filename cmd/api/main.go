@@ -8,9 +8,12 @@ import (
 	"strconv"
 	"syscall"
 
+	"strings"
+
 	"github.com/infralens/infralens/internal/client"
 	"github.com/infralens/infralens/internal/core"
 	"github.com/infralens/infralens/internal/crawler"
+	"github.com/infralens/infralens/internal/notifier"
 	"github.com/infralens/infralens/internal/repo"
 	"github.com/infralens/infralens/internal/scheduler"
 	"github.com/infralens/infralens/internal/server"
@@ -58,13 +61,42 @@ func main() {
 	crawlHandler := handler.NewCrawlHandler(projectSvc)
 	analyticsHandler := handler.NewAnalyticsHandler(projectSvc)
 
+	// Notifier — always log; add email/webhook if env vars are present
+	adapters := []notifier.Adapter{notifier.NewLogAdapter()}
+
+	if smtpHost := os.Getenv("SMTP_HOST"); smtpHost != "" {
+		emailTo := strings.Split(os.Getenv("NOTIFY_EMAIL_TO"), ",")
+		if len(emailTo) > 0 && emailTo[0] != "" {
+			smtpPort := os.Getenv("SMTP_PORT")
+			if smtpPort == "" {
+				smtpPort = "587"
+			}
+			adapters = append(adapters, notifier.NewEmailAdapter(notifier.EmailConfig{
+				Host: smtpHost,
+				Port: smtpPort,
+				User: os.Getenv("SMTP_USER"),
+				Pass: os.Getenv("SMTP_PASS"),
+				From: os.Getenv("NOTIFY_EMAIL_FROM"),
+				To:   emailTo,
+			}))
+			log.Printf("[NOTIFIER] email adapter enabled → %s", os.Getenv("NOTIFY_EMAIL_TO"))
+		}
+	}
+
+	if webhookURL := os.Getenv("NOTIFY_WEBHOOK_URL"); webhookURL != "" {
+		adapters = append(adapters, notifier.NewWebhookAdapter(webhookURL))
+		log.Printf("[NOTIFIER] webhook adapter enabled → %s", webhookURL)
+	}
+
+	notify := notifier.New(writeStore, adapters...)
+
 	// Crawler + scheduler
 	mahaClient := client.New()
 	if err := mahaClient.Authenticate(ctx); err != nil {
 		log.Fatalf("maharera auth: %v", err)
 	}
 	cr := crawler.New(mahaClient, writeStore)
-	sched := scheduler.New(cr, writeStore, startID, endID)
+	sched := scheduler.New(cr, writeStore, notify, startID, endID)
 	if err := sched.Start(crawlSchedule); err != nil {
 		log.Fatalf("scheduler: %v", err)
 	}

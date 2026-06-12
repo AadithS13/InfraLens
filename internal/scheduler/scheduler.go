@@ -20,12 +20,12 @@ type Scheduler struct {
 	endID    int
 }
 
-func New(cr *crawler.Crawler, st *store.Store, startID, endID int) *Scheduler {
+func New(cr *crawler.Crawler, st *store.Store, n *notifier.Notifier, startID, endID int) *Scheduler {
 	return &Scheduler{
 		cron:     cron.New(),
 		crawler:  cr,
 		store:    st,
-		notifier: notifier.New(st),
+		notifier: n,
 		startID:  startID,
 		endID:    endID,
 	}
