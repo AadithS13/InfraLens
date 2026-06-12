@@ -212,7 +212,31 @@ DATABASE_URL="..." CRAWL_SCHEDULE="@every 1m" START_ID=1 END_ID=10 PORT=8080 go 
 
 ## Notification Engine
 
-After every crawl run, the notification engine scans `project_changes` for rows where `notified_at IS NULL` and `field_name` is one of the watched fields. It logs a formatted alert and stamps `notified_at = NOW()` so the same change is never re-notified.
+After every crawl run, the notification engine scans `project_changes` for rows where `notified_at IS NULL` and `field_name` is one of the watched fields. It fans the change out to every registered adapter, then stamps `notified_at = NOW()` so the same change is never re-notified.
+
+### Notification Pipeline
+
+Four stages — from database row to delivered alert:
+
+**Step 1 — Change detected & notification dispatched**
+
+The scheduler detects an unnotified row for a watched field and fires the notifier. A `[NOTIFY]` block is printed to the terminal immediately:
+
+![Change detected — notifier terminal output](docs/screenshots/notifier_terminal.png)
+
+**Step 2 — Webhook received**
+
+Simultaneously, the `WebhookAdapter` POSTs a JSON payload. The full payload arrives at the endpoint within milliseconds, with `InfraLens-Notifier/1.0` as the user-agent:
+
+![Webhook received — webhook.site](docs/screenshots/notifier_webhook.png)
+
+**Step 3 — Email delivered**
+
+The `EmailAdapter` sends via SMTP (port 587 / STARTTLS). The email lands in the inbox with project name, field label, old → new values, and timestamp:
+
+![Email delivered — Mailtrap inbox](docs/screenshots/notifier_email.png)
+
+All three adapters run in the same dispatch loop. A failed adapter logs a warning but never blocks the others or causes a double-notify.
 
 ### Why not notify everything?
 
@@ -223,26 +247,6 @@ Most field changes are noise. Only three fields have direct business value:
 | `project_status` | A status shift (e.g. `New → Ongoing`) means a project has moved forward |
 | `project_current_status` | Tracks internal approval milestones |
 | `proposed_completion_date` | A date pushed forward means a builder is slipping |
-
-### Phase 1 — Terminal output
-
-The notifier fires immediately after each crawl completes. Changes detected in the same run are dispatched together in one batch:
-
-![Notifier terminal output](docs/screenshots/notifier_terminal.png)
-
-### Phase 2 — Email delivery (live)
-
-The `EmailAdapter` sends via SMTP (port 587 / STARTTLS). Tested with Mailtrap — email arrives with project name, field label, old → new values, and timestamp:
-
-![Notifier email in Mailtrap](docs/screenshots/notifier_email.png)
-
-### Phase 2 — Webhook delivery (live)
-
-The `WebhookAdapter` POSTs a JSON payload to any endpoint. Tested with webhook.site — the full payload arrives instantly with `InfraLens-Notifier/1.0` user-agent:
-
-![Notifier webhook on webhook.site](docs/screenshots/notifier_webhook.png)
-
-All three adapters can run simultaneously. A failed adapter logs a warning but never blocks the others or causes a double-notify.
 
 ### Configuring delivery adapters
 
@@ -591,11 +595,32 @@ PostgreSQL
 | **V1** | Data ingestion — crawl MahaRERA, normalize, store | ✅ Done |
 | **V2** | Idempotent crawling — checksum comparison, field-level change detection | ✅ Done |
 | **V3** | Search API — layered REST API with filters, pagination, change history | ✅ Done |
-| **V4** | Scheduled crawling — nightly cron, `crawl_runs` tracking, `GET /api/v1/crawls` | ✅ Done |
-| **V4.5** | Analytics API — status distribution, top builders, by-district aggregations | ✅ Done |
-| **V5 Phase 1** | Notification engine — detect unsent changes, log `[NOTIFY]` blocks, mark notified | ✅ Done |
-| **V5 Phase 2** | Email (SMTP) + webhook delivery adapters — pluggable `Adapter` interface | ✅ Done |
-| **V6** | Search ranking — `pg_trgm` similarity scoring for `?q=prestige nagpur` | 🔜 |
+| **V4** | Scheduled crawling — nightly cron, `crawl_runs` tracking, analytics API | ✅ Done |
+
+**V5 — Notification Platform**
+
+| Feature | Status |
+|---|---|
+| Change subscriptions — `notified_at` tracking, watched fields, dedup | ✅ Done |
+| Terminal notifications — formatted `[NOTIFY]` blocks after every crawl | ✅ Done |
+| Email notifications — SMTP delivery via pluggable `EmailAdapter` | ✅ Done |
+| Webhook notifications — HTTP POST JSON via pluggable `WebhookAdapter` | ✅ Done |
+
+**V6 — Search Intelligence**
+
+| Feature | Status |
+|---|---|
+| Full-text search — `?q=prestige nagpur` across project + promoter fields | 🔜 |
+| Relevance ranking — `pg_trgm` similarity scoring | 🔜 |
+| Query suggestions — top matching terms as you type | 🔜 |
+
+**V7 — AI Intelligence Layer**
+
+| Feature | Status |
+|---|---|
+| Natural language search — "show me delayed projects in Pune" | 🔜 |
+| Builder risk insights — delay patterns, status change frequency | 🔜 |
+| Completion delay prediction — based on historical change data | 🔜 |
 
 ---
 
