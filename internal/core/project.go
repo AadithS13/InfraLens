@@ -12,6 +12,9 @@ type ProjectRepo interface {
 	GetByID(ctx context.Context, id int) (*ProjectDetail, error)
 	GetChanges(ctx context.Context, projectID int) ([]ChangeItem, error)
 	ListCrawlRuns(ctx context.Context, limit int) ([]CrawlRunItem, error)
+	StatusDistribution(ctx context.Context) ([]StatusDistributionItem, error)
+	TopBuilders(ctx context.Context, limit int) ([]TopBuilderItem, error)
+	ByDistrict(ctx context.Context, limit int) ([]DistrictCountItem, error)
 }
 
 type ProjectService struct {
@@ -75,4 +78,43 @@ func (s *ProjectService) ListCrawlRuns(ctx context.Context, limit int) ([]CrawlR
 		runs = []CrawlRunItem{}
 	}
 	return runs, nil
+}
+
+func (s *ProjectService) StatusDistribution(ctx context.Context) ([]StatusDistributionItem, error) {
+	items, err := s.repo.StatusDistribution(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("status distribution: %w", err)
+	}
+	if items == nil {
+		items = []StatusDistributionItem{}
+	}
+	return items, nil
+}
+
+func (s *ProjectService) TopBuilders(ctx context.Context, limit int) ([]TopBuilderItem, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	items, err := s.repo.TopBuilders(ctx, limit)
+	if err != nil {
+		return nil, fmt.Errorf("top builders: %w", err)
+	}
+	if items == nil {
+		items = []TopBuilderItem{}
+	}
+	return items, nil
+}
+
+func (s *ProjectService) ByDistrict(ctx context.Context, limit int) ([]DistrictCountItem, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	items, err := s.repo.ByDistrict(ctx, limit)
+	if err != nil {
+		return nil, fmt.Errorf("by district: %w", err)
+	}
+	if items == nil {
+		items = []DistrictCountItem{}
+	}
+	return items, nil
 }

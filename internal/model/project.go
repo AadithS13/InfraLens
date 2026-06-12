@@ -205,6 +205,15 @@ type ProjectChange struct {
 	DetectedAt time.Time
 }
 
+type NotifiableChange struct {
+	ID          int
+	ProjectName string
+	FieldName   string
+	OldValue    string
+	NewValue    string
+	DetectedAt  time.Time
+}
+
 type CrawlRun struct {
 	ID          int
 	StartedAt   time.Time

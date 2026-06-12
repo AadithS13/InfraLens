@@ -56,6 +56,7 @@ func main() {
 	projectSvc := core.NewProjectService(projectRepo)
 	projectHandler := handler.NewProjectHandler(projectSvc)
 	crawlHandler := handler.NewCrawlHandler(projectSvc)
+	analyticsHandler := handler.NewAnalyticsHandler(projectSvc)
 
 	// Crawler + scheduler
 	mahaClient := client.New()
@@ -70,7 +71,7 @@ func main() {
 	defer sched.Stop()
 
 	// HTTP server
-	srv := server.New(projectHandler, crawlHandler, port)
+	srv := server.New(projectHandler, crawlHandler, analyticsHandler, port)
 	if err := srv.Run(ctx); err != nil {
 		log.Fatalf("server: %v", err)
 	}

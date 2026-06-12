@@ -18,7 +18,7 @@ type Server struct {
 	port   string
 }
 
-func New(projectHandler *handler.ProjectHandler, crawlHandler *handler.CrawlHandler, port string) *Server {
+func New(projectHandler *handler.ProjectHandler, crawlHandler *handler.CrawlHandler, analyticsHandler *handler.AnalyticsHandler, port string) *Server {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -34,6 +34,11 @@ func New(projectHandler *handler.ProjectHandler, crawlHandler *handler.CrawlHand
 			r.Get("/{id}/changes", projectHandler.Changes)
 		})
 		r.Get("/crawls", crawlHandler.List)
+		r.Route("/analytics", func(r chi.Router) {
+			r.Get("/status-distribution", analyticsHandler.StatusDistribution)
+			r.Get("/top-builders", analyticsHandler.TopBuilders)
+			r.Get("/by-district", analyticsHandler.ByDistrict)
+		})
 	})
 
 	// Swagger UI

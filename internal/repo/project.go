@@ -190,6 +190,83 @@ func (r *ProjectRepo) ListCrawlRuns(ctx context.Context, limit int) ([]core.Craw
 	return runs, rows.Err()
 }
 
+// StatusDistribution returns project counts grouped by project_status.
+func (r *ProjectRepo) StatusDistribution(ctx context.Context) ([]core.StatusDistributionItem, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT COALESCE(project_status, 'Unknown') AS status, COUNT(*) AS count
+		FROM projects
+		GROUP BY project_status
+		ORDER BY count DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []core.StatusDistributionItem
+	for rows.Next() {
+		var item core.StatusDistributionItem
+		if err := rows.Scan(&item.Status, &item.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// TopBuilders returns the top promoters ranked by project count.
+func (r *ProjectRepo) TopBuilders(ctx context.Context, limit int) ([]core.TopBuilderItem, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT
+			COALESCE(pr.name, 'Unknown') AS promoter_name,
+			COUNT(p.id)                  AS project_count,
+			COALESCE(SUM(p.total_units), 0) AS total_units
+		FROM projects p
+		LEFT JOIN promoters pr ON p.promoter_id = pr.id
+		GROUP BY pr.name
+		ORDER BY project_count DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []core.TopBuilderItem
+	for rows.Next() {
+		var item core.TopBuilderItem
+		if err := rows.Scan(&item.PromoterName, &item.ProjectCount, &item.TotalUnits); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// ByDistrict returns project counts grouped by district.
+func (r *ProjectRepo) ByDistrict(ctx context.Context, limit int) ([]core.DistrictCountItem, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT COALESCE(a.district, 'Unknown') AS district, COUNT(p.id) AS count
+		FROM projects p
+		LEFT JOIN addresses a ON a.entity_type = 'project' AND a.entity_id = p.id
+		WHERE a.district IS NOT NULL AND a.district != ''
+		GROUP BY a.district
+		ORDER BY count DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []core.DistrictCountItem
+	for rows.Next() {
+		var item core.DistrictCountItem
+		if err := rows.Scan(&item.District, &item.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 // GetChanges returns the change history for a project, most recent first.
 func (r *ProjectRepo) GetChanges(ctx context.Context, projectID int) ([]core.ChangeItem, error) {
 	rows, err := r.db.Query(ctx, `

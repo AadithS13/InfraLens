@@ -205,6 +205,46 @@ func (s *Store) ListCrawlRuns(ctx context.Context, limit int) ([]model.CrawlRun,
 	return runs, rows.Err()
 }
 
+// GetUnnotifiedChanges returns project_changes rows that haven't been notified yet,
+// filtered to the given field names, joined with project name for display.
+func (s *Store) GetUnnotifiedChanges(ctx context.Context, fields []string) ([]model.NotifiableChange, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT pc.id, p.project_name, pc.field_name, pc.old_value, pc.new_value, pc.detected_at
+		FROM project_changes pc
+		JOIN projects p ON p.id = pc.project_id
+		WHERE pc.notified_at IS NULL
+		  AND pc.field_name = ANY($1)
+		ORDER BY pc.detected_at ASC`,
+		fields,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var changes []model.NotifiableChange
+	for rows.Next() {
+		var c model.NotifiableChange
+		if err := rows.Scan(&c.ID, &c.ProjectName, &c.FieldName, &c.OldValue, &c.NewValue, &c.DetectedAt); err != nil {
+			return nil, err
+		}
+		changes = append(changes, c)
+	}
+	return changes, rows.Err()
+}
+
+// MarkChangesNotified stamps notified_at = NOW() on the given change IDs.
+func (s *Store) MarkChangesNotified(ctx context.Context, ids []int) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := s.db.Exec(ctx,
+		`UPDATE project_changes SET notified_at = NOW() WHERE id = ANY($1)`,
+		ids,
+	)
+	return err
+}
+
 // InsertProjectChanges batch-inserts detected field-level changes.
 func (s *Store) InsertProjectChanges(ctx context.Context, changes []model.ProjectChange) error {
 	if len(changes) == 0 {

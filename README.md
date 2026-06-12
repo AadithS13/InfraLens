@@ -1,8 +1,8 @@
 # InfraLens
 
-A construction intelligence platform that crawls public RERA registries, normalizes project and promoter metadata, maintains field-level change history, and exposes a REST API for search and analysis.
+A construction intelligence platform that crawls public RERA registries, normalizes project and promoter metadata, tracks field-level changes, fires notifications when high-value fields shift, and exposes a REST API for search and analytics.
 
-Inspired by platforms like Biltrax — built to demonstrate real-world data engineering: web crawling, API reverse engineering, idempotent ingestion, change detection, and layered API design.
+Inspired by platforms like Biltrax — built to demonstrate real-world data engineering: web crawling, API reverse engineering, idempotent ingestion, change detection, notification pipelines, and layered API design.
 
 ---
 
@@ -16,6 +16,8 @@ InfraLens crawls the **MahaRERA** (Maharashtra Real Estate Regulatory Authority)
 - Professional contacts (architects, engineers, agents)
 - Per-crawl snapshots with MD5 checksums
 - Field-level change history — what changed, from what value, to what value, when
+- Notifications when high-value fields change (status shifts, deadline slips)
+- Analytics — status distribution, top builders by project count, breakdown by district
 
 ---
 
@@ -46,11 +48,27 @@ flowchart TD
     CR --> C
     C -- processed / failed counts --> UPD[Update crawl_run status]
     UPD --> M
+    L --> NOTIF[Notification Engine]
+    NOTIF -- unnotified changes --> NL[Log to Terminal\nPhase 1]
+    NOTIF -- Phase 2 --> EMAIL[Email]
+    NOTIF -- Phase 2 --> WEBHOOK[Webhook]
     M --> N[REST API]
-    N --> O[Search Projects]
-    N --> P[Project Details]
-    N --> Q[Change History]
+    N --> O[Search / Detail / Changes]
     N --> R[Crawl Run History]
+    N --> S[Analytics]
+```
+
+### Notification Pipeline
+
+```mermaid
+flowchart LR
+    A[Crawler] --> B[Snapshots]
+    B --> C[Diff Engine]
+    C --> D[project_changes]
+    D --> E[Notification Engine]
+    E --> F[Email]
+    E --> G[Webhook]
+    E --> H[Slack]
 ```
 
 ---
@@ -109,6 +127,17 @@ erDiagram
         string old_value
         string new_value
         timestamp detected_at
+        timestamp notified_at
+    }
+    CRAWL_RUNS {
+        bigint id PK
+        timestamp started_at
+        timestamp finished_at
+        string status
+        int start_id
+        int end_id
+        int processed
+        int failed
     }
     ADDRESSES {
         bigint id PK
@@ -137,7 +166,7 @@ erDiagram
 | `addresses` | Shared table for project + promoter addresses via `entity_type` / `entity_id` |
 | `contacts` | Architects, engineers, agents linked to a project |
 | `project_snapshots` | Full raw JSON + MD5 checksum of every crawl per project |
-| `project_changes` | Field-level change log — `field_name`, `old_value`, `new_value`, `detected_at` |
+| `project_changes` | Field-level change log — `field_name`, `old_value`, `new_value`, `detected_at`, `notified_at` |
 | `crawl_runs` | Audit log of every scheduled crawl — status, duration, processed/failed counts |
 
 ---
@@ -177,6 +206,106 @@ DATABASE_URL="..." CRAWL_SCHEDULE="0 * * * *" START_ID=1 END_ID=50000 PORT=8080 
 
 # Testing: every minute
 DATABASE_URL="..." CRAWL_SCHEDULE="@every 1m" START_ID=1 END_ID=10 PORT=8080 go run ./cmd/api/
+```
+
+---
+
+## Notification Engine
+
+After every crawl run, the notification engine scans `project_changes` for rows where `notified_at IS NULL` and `field_name` is one of the watched fields. It logs a formatted alert and stamps `notified_at = NOW()` so the same change is never re-notified.
+
+### Why not notify everything?
+
+Most field changes are noise. Only three fields have direct business value:
+
+| Field | Why it matters |
+|---|---|
+| `project_status` | A status shift (e.g. `New → Ongoing`) means a project has moved forward |
+| `project_current_status` | Tracks internal approval milestones |
+| `proposed_completion_date` | A date pushed forward means a builder is slipping |
+
+### Phase 1 — Terminal output (live)
+
+![Notifier output](docs/screenshots/notifier_output.png)
+
+The notifier fires immediately after each crawl completes. Two changes detected in the same run are dispatched together in one batch.
+
+### Phase 2 — Email / Webhook (roadmap)
+
+```
+Scheduler
+    ↓
+Crawler
+    ↓
+Snapshots
+    ↓
+Diff Engine
+    ↓
+project_changes
+    ↓
+Notification Engine
+    ↓
+Email / Webhook / Slack
+```
+
+Phase 2 replaces the `logChange()` call with delivery adapters — one for email (SMTP), one for webhooks (HTTP POST). The engine logic stays identical; only the delivery layer changes.
+
+---
+
+## Analytics API
+
+Three read-only aggregation endpoints over the projects dataset. No query parameters needed — results are pre-grouped and sorted by count descending.
+
+### `GET /api/v1/analytics/status-distribution`
+
+Project counts grouped by `project_status`:
+
+```bash
+curl "localhost:8080/api/v1/analytics/status-distribution"
+```
+
+```json
+{
+  "data": [
+    { "status": "Ongoing", "count": 14 },
+    { "status": "New",     "count": 6  }
+  ]
+}
+```
+
+### `GET /api/v1/analytics/top-builders?limit=5`
+
+Top promoters ranked by project count, with total unit inventory:
+
+```bash
+curl "localhost:8080/api/v1/analytics/top-builders?limit=5"
+```
+
+```json
+{
+  "data": [
+    { "promoter_name": "Prestige Group",   "project_count": 45, "total_units": 12500 },
+    { "promoter_name": "Godrej Properties","project_count": 38, "total_units": 9800  }
+  ]
+}
+```
+
+### `GET /api/v1/analytics/by-district?limit=5`
+
+Project counts by district — useful for market concentration analysis:
+
+```bash
+curl "localhost:8080/api/v1/analytics/by-district?limit=5"
+```
+
+```json
+{
+  "data": [
+    { "district": "Thane",     "count": 47 },
+    { "district": "Nagpur",    "count": 22 },
+    { "district": "Aurangabad","count": 15 }
+  ]
+}
 ```
 
 ---
@@ -343,6 +472,9 @@ ORDER BY changes DESC;
 | `GET` | `/api/v1/projects/{id}` | Full project detail — promoter, addresses, contacts |
 | `GET` | `/api/v1/projects/{id}/changes` | Field-level change history for a project |
 | `GET` | `/api/v1/crawls` | Scheduled crawl run history — status, counts, duration |
+| `GET` | `/api/v1/analytics/status-distribution` | Project counts grouped by status |
+| `GET` | `/api/v1/analytics/top-builders` | Top promoters by project count + total units |
+| `GET` | `/api/v1/analytics/by-district` | Project counts grouped by district |
 | `GET` | `/health` | Health check |
 
 ### Query Parameters — `GET /api/v1/projects`
@@ -445,8 +577,10 @@ PostgreSQL
 | **V2** | Idempotent crawling — checksum comparison, field-level change detection | ✅ Done |
 | **V3** | Search API — layered REST API with filters, pagination, change history | ✅ Done |
 | **V4** | Scheduled crawling — nightly cron, `crawl_runs` tracking, `GET /api/v1/crawls` | ✅ Done |
-| **V5** | Notifications — email/webhook on status changes or new registrations | 🔜 |
-| **V6** | Duplicate detection — trigram similarity + Levenshtein for project name dedup | 🔜 |
+| **V4.5** | Analytics API — status distribution, top builders, by-district aggregations | ✅ Done |
+| **V5 Phase 1** | Notification engine — detect unsent changes, log `[NOTIFY]` blocks, mark notified | ✅ Done |
+| **V5 Phase 2** | Email + webhook delivery adapters for notifications | 🔜 Next |
+| **V6** | Search ranking — `pg_trgm` similarity scoring for `?q=prestige nagpur` | 🔜 |
 
 ---
 
@@ -542,7 +676,8 @@ Migration files follow Goose-style timestamp naming:
 migrations/
 ├── 20260606135000_InfraLens_Create_Schema.sql      # Core tables
 ├── 20260606135001_InfraLens_Add_ProjectChanges.sql # Change detection table
-└── 20260607000000_InfraLens_Add_CrawlRuns.sql      # Scheduler audit log
+├── 20260607000000_InfraLens_Add_CrawlRuns.sql      # Scheduler audit log
+└── 20260612000000_InfraLens_Add_NotifiedAt.sql     # Notification tracking
 ```
 
 ---
@@ -566,17 +701,20 @@ InfraLens/
 │   ├── crawler/
 │   │   └── crawler.go           # Worker pool, orchestration, diff logic
 │   ├── scheduler/
-│   │   └── scheduler.go         # robfig/cron wrapper, crawl_run lifecycle
+│   │   └── scheduler.go         # robfig/cron wrapper, crawl_run lifecycle, calls notifier
+│   ├── notifier/
+│   │   └── notifier.go          # finds unnotified changes, logs [NOTIFY], marks notified
 │   ├── repo/
-│   │   └── project.go           # API read layer (search, detail, changes, crawl runs)
+│   │   └── project.go           # API read layer (search, detail, changes, crawl runs, analytics)
 │   ├── core/
-│   │   ├── project.go           # ProjectService — business logic
-│   │   └── types.go             # DTOs, SearchFilter, ListResponse, CrawlRunItem
+│   │   ├── project.go           # ProjectService — business logic + analytics methods
+│   │   └── types.go             # DTOs, SearchFilter, CrawlRunItem, analytics types
 │   └── server/
 │       ├── server.go            # chi router, middleware, graceful shutdown
 │       └── handler/
 │           ├── project.go       # HTTP handlers — List, Get, Changes
-│           └── crawl.go         # HTTP handler — crawl run history
+│           ├── crawl.go         # HTTP handler — crawl run history
+│           └── analytics.go     # HTTP handlers — status dist, top builders, by district
 ├── migrations/
 └── docker-compose.yml
 ```

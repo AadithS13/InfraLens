@@ -96,6 +96,24 @@ type CrawlRunItem struct {
 	Error      *string    `json:"error,omitempty"`
 }
 
+// --- Analytics types ---
+
+type StatusDistributionItem struct {
+	Status string `json:"status"`
+	Count  int    `json:"count"`
+}
+
+type TopBuilderItem struct {
+	PromoterName string `json:"promoter_name"`
+	ProjectCount int    `json:"project_count"`
+	TotalUnits   int    `json:"total_units"`
+}
+
+type DistrictCountItem struct {
+	District string `json:"district"`
+	Count    int    `json:"count"`
+}
+
 // --- Generic list response ---
 
 type Meta struct {

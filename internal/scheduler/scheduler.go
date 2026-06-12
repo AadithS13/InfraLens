@@ -7,24 +7,27 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/infralens/infralens/internal/crawler"
+	"github.com/infralens/infralens/internal/notifier"
 	"github.com/infralens/infralens/internal/store"
 )
 
 type Scheduler struct {
-	cron    *cron.Cron
-	crawler *crawler.Crawler
-	store   *store.Store
-	startID int
-	endID   int
+	cron     *cron.Cron
+	crawler  *crawler.Crawler
+	store    *store.Store
+	notifier *notifier.Notifier
+	startID  int
+	endID    int
 }
 
 func New(cr *crawler.Crawler, st *store.Store, startID, endID int) *Scheduler {
 	return &Scheduler{
-		cron:    cron.New(),
-		crawler: cr,
-		store:   st,
-		startID: startID,
-		endID:   endID,
+		cron:     cron.New(),
+		crawler:  cr,
+		store:    st,
+		notifier: notifier.New(st),
+		startID:  startID,
+		endID:    endID,
 	}
 }
 
@@ -66,4 +69,9 @@ func (s *Scheduler) runCrawl() {
 	}
 
 	log.Printf("[SCHEDULER] crawl_run %d done: status=%s processed=%d failed=%d", runID, status, processed, failed)
+
+	// Run notifications after every crawl — finds unsent changes and logs them
+	if err := s.notifier.Notify(ctx); err != nil {
+		log.Printf("[SCHEDULER] notifier error: %v", err)
+	}
 }
