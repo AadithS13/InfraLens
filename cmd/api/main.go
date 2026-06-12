@@ -13,6 +13,7 @@ import (
 	"github.com/infralens/infralens/internal/client"
 	"github.com/infralens/infralens/internal/core"
 	"github.com/infralens/infralens/internal/crawler"
+	"github.com/infralens/infralens/internal/nlsearch"
 	"github.com/infralens/infralens/internal/notifier"
 	"github.com/infralens/infralens/internal/repo"
 	"github.com/infralens/infralens/internal/scheduler"
@@ -62,7 +63,18 @@ func main() {
 	crawlHandler := handler.NewCrawlHandler(projectSvc)
 	analyticsHandler := handler.NewAnalyticsHandler(projectSvc)
 	searchHandler := handler.NewSearchHandler(projectSvc)
-	nlSearchHandler := handler.NewNLSearchHandler(projectSvc)
+
+	// V7.1 / V7.2 parser selection — set ANTHROPIC_API_KEY to enable LLM parsing.
+	// Without the key the server starts fine and uses the rule-based parser (V7.1).
+	ruleParser := nlsearch.NewRuleParser()
+	var nlParser nlsearch.Parser = ruleParser
+	if anthropicKey := os.Getenv("ANTHROPIC_API_KEY"); anthropicKey != "" {
+		log.Println("[NL] V7.2 LLM parser enabled (claude-haiku-4-5) — ~₹0.05/query")
+		nlParser = nlsearch.NewFallbackParser(nlsearch.NewLLMParser(anthropicKey), ruleParser)
+	} else {
+		log.Println("[NL] V7.1 rule-based parser active (set ANTHROPIC_API_KEY to enable V7.2)")
+	}
+	nlSearchHandler := handler.NewNLSearchHandler(projectSvc, nlParser)
 
 	// Notifier — always log; add email/webhook if env vars are present
 	adapters := []notifier.Adapter{notifier.NewLogAdapter()}

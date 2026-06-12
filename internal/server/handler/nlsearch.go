@@ -7,23 +7,36 @@ import (
 	"github.com/infralens/infralens/internal/nlsearch"
 )
 
-// NLSearchHandler handles GET /api/v1/search/nl — V7.1 Rule-Based NL Search.
+// NLSearchHandler handles GET /api/v1/search/nl.
 //
-// The query string is parsed by the nlsearch package into a structured filter.
-// The response always includes an "interpreted" field showing exactly which
-// SQL filters were extracted, so callers can show "Searched for: status=Ongoing, district=Pune".
+// V7.1: parser is a RuleParser (zero cost, no external calls).
+// V7.2: parser is an LLMParser wrapped in a FallbackParser (Claude Haiku API).
 //
-// V7.2 will swap in an LLM-backed parser; this handler and its response shape
-// stay exactly the same.
+// The response shape, SQL, and handler logic are identical in both versions —
+// only the nlsearch.Parser implementation changes.
 type NLSearchHandler struct {
-	svc *core.ProjectService
+	svc    *core.ProjectService
+	parser nlsearch.Parser
 }
 
-func NewNLSearchHandler(svc *core.ProjectService) *NLSearchHandler {
-	return &NLSearchHandler{svc: svc}
+// NewNLSearchHandler wires the handler with the given parser.
+// main.go selects either RuleParser or LLMParser+FallbackParser based on
+// whether ANTHROPIC_API_KEY is set.
+func NewNLSearchHandler(svc *core.ProjectService, parser nlsearch.Parser) *NLSearchHandler {
+	return &NLSearchHandler{svc: svc, parser: parser}
 }
 
 // Search handles GET /api/v1/search/nl?q=<natural language query>
+//
+// Response shape:
+//
+//	{
+//	  "query":       "show ongoing projects in Pune",
+//	  "query_type":  "projects",
+//	  "interpreted": {"status": "Ongoing", "district": "Pune"},
+//	  "data":        [...],
+//	  "meta":        {...}
+//	}
 func (h *NLSearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	if q == "" {
@@ -31,7 +44,11 @@ func (h *NLSearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parsed := nlsearch.Parse(q)
+	parsed, err := h.parser.Parse(r.Context(), q)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not parse query: "+err.Error())
+		return
+	}
 
 	// Builder intent — returns promoter list, not project list
 	if parsed.QueryType == "builders" {

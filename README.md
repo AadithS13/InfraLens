@@ -337,9 +337,16 @@ curl "localhost:8080/api/v1/search/suggestions?q=pramukh"
 
 ---
 
-## Natural Language Search (V7.1)
+## Natural Language Search (V7.1 + V7.2)
 
-Type plain English. Get structured results. No LLM required — the engine pattern-matches against known intent rules and converts the query into SQL filters on the fly.
+Type plain English. Get structured results. The NL search layer ships in two modes, selected at startup by whether `ANTHROPIC_API_KEY` is set:
+
+| Mode | Parser | Cost | When to use |
+|---|---|---|---|
+| **V7.1** | `RuleParser` — pattern matching | Free | No API key, deterministic, offline |
+| **V7.2** | `LLMParser` — Claude Haiku API | ~₹0.05/query | Richer phrasing, fuzzy intent, ambiguous queries |
+
+Both return the exact same `ParsedQuery` → handler → SQL pipeline. Only the parser changes. If V7.2 encounters an API error, it transparently falls back to V7.1 (zero user-visible impact).
 
 Every response includes an `interpreted` field showing exactly which filters were extracted — so you always know what the query did.
 
@@ -428,17 +435,81 @@ curl "localhost:8080/api/v1/search/nl?q=show+residential+projects+in+Thane"
 
 ---
 
+### V7.2 — LLM-Powered Queries (Claude Haiku)
+
+Enable V7.2 by setting `ANTHROPIC_API_KEY` before starting the server:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+DATABASE_URL="postgres://infralens:infralens@127.0.0.1:5433/infralens?sslmode=disable" \
+  go run ./cmd/api/
+```
+
+The startup log confirms which parser is active:
+
+![V7.2 server startup — LLM parser enabled](docs/screenshots/nl_v72_startup.png)
+
+V7.2 handles phrasing that V7.1's keyword rules would miss — synonyms, natural language variants, and compound intents:
+
+---
+
+**"Plotted development projects that missed their deadline"**
+
+V7.1 catches `type=Plotted Development` but has no rule for "missed deadline". V7.2 understands the intent and sets `delayed=true`:
+
+![V7.2 — missed deadline → delayed filter](docs/screenshots/nl_v72_missed_deadline.png)
+
+---
+
+**"Show stalled projects in Pune"**
+
+V7.1 has no keyword for "stalled". V7.2 maps it to `status=Lapsed`:
+
+![V7.2 — stalled → status=Lapsed](docs/screenshots/nl_v72_stalled_lapsed.png)
+
+---
+
+**"Ongoing residential projects in Thane"** — 3 simultaneous filters, 188 results:
+
+![V7.2 — three simultaneous filters](docs/screenshots/nl_v72_three_filters.png)
+
+---
+
+**"Which developers have registered more than 5 projects?"** — natural phrasing → builder query:
+
+![V7.2 — builders with natural phrasing](docs/screenshots/nl_v72_builders.png)
+
+---
+
+**Fallback in action** — if the Claude API is unreachable or credits are exhausted, `FallbackParser` transparently falls back to V7.1 rules. The client always gets a 200:
+
+![V7.2 — graceful fallback to V7.1](docs/screenshots/nl_v72_fallback_2.png)
+
+---
+
+| Query | V7.1 | V7.2 |
+|---|---|---|
+| "delayed beyond original completion date" | ✅ `delayed=true` | ✅ `delayed=true` |
+| "projects that missed their deadline" | ❌ not recognized | ✅ `delayed=true` |
+| "commercial real estate in Pune" | ✅ `type=Commercial, district=Pune` | ✅ `type=Commercial, district=Pune` |
+| "stalled projects" | ❌ not recognized | ✅ `status=Lapsed` |
+| "plotted projects past completion" | ❌ misses `delayed` | ✅ `type=Plotted Development, delayed=true` |
+
+**Cost:** ~₹0.05/query (360 input tokens × $1/1M + 50 output tokens × $5/1M on claude-haiku-4-5 at ₹85/$).
+
+---
+
 ### How it works — V7.1 vs V7.2
 
 ```mermaid
 flowchart TD
     A["User Query\nshow residential projects in Thane"] --> B
 
-    subgraph PARSER ["nlsearch.Parse()  —  the only thing that changes in V7.2"]
-        B{"V7.1\nRule-Based"}
-        C{"V7.2\nLLM-Powered\n🔜"}
+    subgraph PARSER ["nlsearch.Parser interface  —  the only swappable part"]
+        B{"V7.1\nRuleParser\n(no key set)"}
+        C{"V7.2\nLLMParser\n(ANTHROPIC_API_KEY set)"}
         B --> D["Pattern Matching\nstatus · type · location · delayed · builder"]
-        C --> E["Claude API\nnatural language → JSON filter"]
+        C --> E["Claude Haiku API\ntool use → structured JSON"]
     end
 
     D --> F["ParsedQuery\n{ interpreted, Filter, QueryType }"]
@@ -456,9 +527,9 @@ flowchart TD
     K --> L
 ```
 
-The parser is the **only swappable part**. The handler, `SearchFilter`, SQL, and response shape are identical in V7.1 and V7.2 — dropping in an LLM is a one-file change.
+The parser is the **only swappable part**. The handler, `SearchFilter`, SQL, and response shape are identical in V7.1 and V7.2 — dropping in the LLM is a single-file addition plus a one-line change in `main.go`.
 
-**Intents recognized in V7.1:**
+**Intents recognized in V7.1 (keyword rules):**
 
 | Pattern | Example phrase | SQL filter |
 |---|---|---|
@@ -467,6 +538,8 @@ The parser is the **only swappable part**. The handler, `SearchFilter`, SQL, and
 | Location | "in Pune", "at Thane", "near Nagpur" | `WHERE district ILIKE ?` |
 | Delayed | "delayed", "overdue", "beyond original" | `WHERE proposed > original` |
 | Builder count | "builders with more than N projects" | `HAVING count(projects) >= N` |
+
+**V7.2 expands coverage to any natural phrasing** — "missed their deadline", "stalled", "past due", "projects that slipped" — by sending the query to Claude Haiku with a `extract_search_filters` tool use call. The model is constrained to call the tool and return a typed JSON object; the response is decoded directly into the same `ParsedQuery` struct that V7.1 produces.
 
 ---
 
@@ -830,7 +903,7 @@ PostgreSQL
 | Feature | Status |
 |---|---|
 | V7.1 Rule-based NL search — status, type, location, delayed, builder count intents | ✅ Done |
-| V7.2 LLM-powered query generation — natural language → SQL via Claude API | 🔜 |
+| V7.2 LLM-powered query generation — natural language → SQL via Claude Haiku API | ✅ Done |
 | Builder risk insights — delay patterns, status change frequency | 🔜 |
 | Completion delay prediction — based on historical change data | 🔜 |
 
@@ -838,11 +911,12 @@ PostgreSQL
 
 ## Tech Stack
 
-- **Go 1.23** — crawler, HTTP client, worker pool, REST API
+- **Go 1.24** — crawler, HTTP client, worker pool, REST API
 - **chi** — lightweight HTTP router
 - **robfig/cron v3** — embedded cron scheduler
 - **PostgreSQL 16** — primary store
 - **Docker** — local Postgres via docker-compose
+- **Anthropic Go SDK** (`anthropic-sdk-go v1.50.1`) — V7.2 LLM-powered NL query parsing via Claude Haiku
 
 ---
 
@@ -904,6 +978,7 @@ DATABASE_URL="postgres://infralens:infralens@127.0.0.1:5433/infralens?sslmode=di
 | `NOTIFY_EMAIL_FROM` | `SMTP_USER` | From address shown in the email |
 | `NOTIFY_EMAIL_TO` | — | Comma-separated recipient list. Email adapter activates when set |
 | `NOTIFY_WEBHOOK_URL` | — | HTTP POST endpoint for webhook notifications. Adapter activates when set |
+| `ANTHROPIC_API_KEY` | — | Anthropic API key. When set, enables V7.2 LLM-powered NL search (claude-haiku-4-5). Unset = V7.1 rule-based parser (free). |
 
 ---
 
@@ -968,12 +1043,17 @@ InfraLens/
 │   ├── core/
 │   │   ├── project.go           # ProjectService — business logic + analytics methods
 │   │   └── types.go             # DTOs, SearchFilter, CrawlRunItem, analytics types
+│   ├── nlsearch/
+│   │   ├── parser.go            # Parser interface, RuleParser (V7.1), FallbackParser
+│   │   └── llm_parser.go        # LLMParser (V7.2) — Claude Haiku tool use
 │   └── server/
 │       ├── server.go            # chi router, middleware, graceful shutdown
 │       └── handler/
 │           ├── project.go       # HTTP handlers — List, Get, Changes
 │           ├── crawl.go         # HTTP handler — crawl run history
-│           └── analytics.go     # HTTP handlers — status dist, top builders, by district
+│           ├── analytics.go     # HTTP handlers — status dist, top builders, by district
+│           ├── search.go        # HTTP handler — full-text search suggestions
+│           └── nlsearch.go      # HTTP handler — natural language search (V7.1 / V7.2)
 ├── migrations/
 └── docker-compose.yml
 ```
