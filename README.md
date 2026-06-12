@@ -337,6 +337,139 @@ curl "localhost:8080/api/v1/search/suggestions?q=pramukh"
 
 ---
 
+## Natural Language Search (V7.1)
+
+Type plain English. Get structured results. No LLM required — the engine pattern-matches against known intent rules and converts the query into SQL filters on the fly.
+
+Every response includes an `interpreted` field showing exactly which filters were extracted — so you always know what the query did.
+
+### `GET /api/v1/search/nl?q=<query>`
+
+**Show ongoing projects in Pune**
+
+```bash
+curl "localhost:8080/api/v1/search/nl?q=show+ongoing+projects+in+Pune"
+```
+
+```json
+{
+  "query": "show ongoing projects in Pune",
+  "query_type": "projects",
+  "interpreted": { "status": "Ongoing", "district": "Pune" },
+  "data": [...],
+  "meta": { "page": 1, "limit": 20, "total": 1 }
+}
+```
+
+![NL search — ongoing projects in Pune](docs/screenshots/nl_ongoing_pune.png)
+
+---
+
+**Show projects delayed beyond original completion date**
+
+```bash
+curl "localhost:8080/api/v1/search/nl?q=show+projects+delayed+beyond+original+completion+date"
+```
+
+```json
+{
+  "query": "show projects delayed beyond original completion date",
+  "query_type": "projects",
+  "interpreted": { "filter": "proposed_completion_date > original_completion_date" },
+  "data": [...],
+  "meta": { "page": 1, "limit": 20, "total": 314 }
+}
+```
+
+![NL search — delayed projects](docs/screenshots/nl_delayed.png)
+
+---
+
+**Show builders with more than 2 projects**
+
+Builder queries switch `query_type` to `"builders"` and return a promoter list instead of a project list:
+
+```bash
+curl "localhost:8080/api/v1/search/nl?q=show+builders+with+more+than+2+projects"
+```
+
+```json
+{
+  "query": "show builders with more than 2 projects",
+  "query_type": "builders",
+  "interpreted": { "min_projects": "2" },
+  "data": [
+    { "promoter_name": "Prestige Group", "project_count": 45, "total_units": 12500 }
+  ]
+}
+```
+
+![NL search — builders query](docs/screenshots/nl_builders.png)
+
+---
+
+**Show residential projects in Thane**
+
+```bash
+curl "localhost:8080/api/v1/search/nl?q=show+residential+projects+in+Thane"
+```
+
+```json
+{
+  "query": "show residential projects in Thane",
+  "query_type": "projects",
+  "interpreted": { "type": "Residential", "district": "Thane" },
+  "data": [...],
+  "meta": { "page": 1, "limit": 20, "total": 188 }
+}
+```
+
+![NL search — residential projects in Thane](docs/screenshots/nl_residential_thane.png)
+
+---
+
+### How it works — V7.1 vs V7.2
+
+```mermaid
+flowchart TD
+    A["User Query\nshow residential projects in Thane"] --> B
+
+    subgraph PARSER ["nlsearch.Parse()  —  the only thing that changes in V7.2"]
+        B{"V7.1\nRule-Based"}
+        C{"V7.2\nLLM-Powered\n🔜"}
+        B --> D["Pattern Matching\nstatus · type · location · delayed · builder"]
+        C --> E["Claude API\nnatural language → JSON filter"]
+    end
+
+    D --> F["ParsedQuery\n{ interpreted, Filter, QueryType }"]
+    E --> F
+
+    F --> G{QueryType?}
+
+    G -- projects --> H["core.SearchFilter\nStatus · Type · District · Delayed · Q"]
+    G -- builders --> I["BuildersWithMinProjects\nHAVING count ≥ N"]
+
+    H --> J["repo.Search()\nSELECT … WHERE … ORDER BY relevance"]
+    I --> K["repo.BuildersWithMinProjects()\nGROUP BY promoter HAVING count ≥ N"]
+
+    J --> L["JSON Response\n{ query, interpreted, data, meta }"]
+    K --> L
+```
+
+The parser is the **only swappable part**. The handler, `SearchFilter`, SQL, and response shape are identical in V7.1 and V7.2 — dropping in an LLM is a one-file change.
+
+**Intents recognized in V7.1:**
+
+| Pattern | Example phrase | SQL filter |
+|---|---|---|
+| Status | "ongoing", "lapsed", "under approval" | `WHERE project_status = ?` |
+| Type | "residential", "commercial", "plotted" | `WHERE project_type ILIKE ?` |
+| Location | "in Pune", "at Thane", "near Nagpur" | `WHERE district ILIKE ?` |
+| Delayed | "delayed", "overdue", "beyond original" | `WHERE proposed > original` |
+| Builder count | "builders with more than N projects" | `HAVING count(projects) >= N` |
+
+---
+
 ## Analytics API
 
 Three read-only aggregation endpoints over the projects dataset. No query parameters needed — results are pre-grouped and sorted by count descending.
@@ -561,6 +694,7 @@ ORDER BY changes DESC;
 | `GET` | `/api/v1/analytics/top-builders` | Top promoters by project count + total units |
 | `GET` | `/api/v1/analytics/by-district` | Project counts grouped by district |
 | `GET` | `/api/v1/search/suggestions` | Autocomplete — ranked project + promoter names for `?q=` |
+| `GET` | `/api/v1/search/nl` | Natural language search — plain English → SQL filters |
 | `GET` | `/health` | Health check |
 
 ### Query Parameters — `GET /api/v1/projects`
@@ -695,7 +829,8 @@ PostgreSQL
 
 | Feature | Status |
 |---|---|
-| Natural language search — "show me delayed projects in Pune" | 🔜 |
+| V7.1 Rule-based NL search — status, type, location, delayed, builder count intents | ✅ Done |
+| V7.2 LLM-powered query generation — natural language → SQL via Claude API | 🔜 |
 | Builder risk insights — delay patterns, status change frequency | 🔜 |
 | Completion delay prediction — based on historical change data | 🔜 |
 
