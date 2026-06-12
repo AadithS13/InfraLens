@@ -68,10 +68,13 @@ func (r *ProjectRepo) Search(ctx context.Context, f core.SearchFilter) ([]core.P
 		      OR word_similarity($9, COALESCE(pr.name, ''))      > 0.1
 		      OR word_similarity($9, COALESCE(a.district, ''))   > 0.1
 		  ))
+		  AND ($10::bool IS NULL OR (
+		      $10 = TRUE AND p.proposed_completion_date > p.original_completion_date
+		  ))
 		ORDER BY relevance DESC, p.id DESC
 		LIMIT $7 OFFSET $8`,
 		f.City, f.District, f.State, f.Promoter, f.Status, f.Type,
-		f.Limit, f.Offset(), f.Q,
+		f.Limit, f.Offset(), f.Q, f.Delayed,
 	)
 	if err != nil {
 		return nil, 0, err
@@ -104,6 +107,36 @@ func (r *ProjectRepo) Search(ctx context.Context, f core.SearchFilter) ([]core.P
 		items = append(items, item)
 	}
 	return items, total, rows.Err()
+}
+
+// BuildersWithMinProjects returns promoters with at least minCount projects,
+// ranked by project count descending. Powers the NL "builders with more than N" intent.
+func (r *ProjectRepo) BuildersWithMinProjects(ctx context.Context, minCount, limit int) ([]core.TopBuilderItem, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT
+			COALESCE(pr.name, 'Unknown') AS promoter_name,
+			COUNT(p.id)                  AS project_count,
+			COALESCE(SUM(p.total_units), 0) AS total_units
+		FROM projects p
+		LEFT JOIN promoters pr ON p.promoter_id = pr.id
+		GROUP BY pr.name
+		HAVING COUNT(p.id) >= $1
+		ORDER BY project_count DESC
+		LIMIT $2`, minCount, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []core.TopBuilderItem
+	for rows.Next() {
+		var item core.TopBuilderItem
+		if err := rows.Scan(&item.PromoterName, &item.ProjectCount, &item.TotalUnits); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 // Suggestions returns autocomplete results for a partial query.

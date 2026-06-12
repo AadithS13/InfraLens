@@ -61,6 +61,7 @@ func main() {
 	crawlHandler := handler.NewCrawlHandler(projectSvc)
 	analyticsHandler := handler.NewAnalyticsHandler(projectSvc)
 	searchHandler := handler.NewSearchHandler(projectSvc)
+	nlSearchHandler := handler.NewNLSearchHandler(projectSvc)
 
 	// Notifier — always log; add email/webhook if env vars are present
 	adapters := []notifier.Adapter{notifier.NewLogAdapter()}
@@ -104,7 +105,7 @@ func main() {
 	defer sched.Stop()
 
 	// HTTP server
-	srv := server.New(projectHandler, crawlHandler, analyticsHandler, searchHandler, port)
+	srv := server.New(projectHandler, crawlHandler, analyticsHandler, searchHandler, nlSearchHandler, port)
 	if err := srv.Run(ctx); err != nil {
 		log.Fatalf("server: %v", err)
 	}

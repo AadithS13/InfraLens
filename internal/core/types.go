@@ -12,6 +12,7 @@ type SearchFilter struct {
 	Promoter *string
 	Status   *string
 	Type     *string
+	Delayed  *bool // true → proposed_completion_date > original_completion_date
 	Page     int
 	Limit    int
 }

@@ -16,6 +16,7 @@ type ProjectRepo interface {
 	TopBuilders(ctx context.Context, limit int) ([]TopBuilderItem, error)
 	ByDistrict(ctx context.Context, limit int) ([]DistrictCountItem, error)
 	Suggestions(ctx context.Context, q string, limit int) ([]SuggestionItem, error)
+	BuildersWithMinProjects(ctx context.Context, minCount, limit int) ([]TopBuilderItem, error)
 }
 
 type ProjectService struct {
@@ -116,6 +117,25 @@ func (s *ProjectService) ByDistrict(ctx context.Context, limit int) ([]DistrictC
 	}
 	if items == nil {
 		items = []DistrictCountItem{}
+	}
+	return items, nil
+}
+
+// BuildersWithMinProjects returns promoters that have at least minCount projects,
+// ranked by project count descending. Used by the NL search "builders with more than N projects" intent.
+func (s *ProjectService) BuildersWithMinProjects(ctx context.Context, minCount, limit int) ([]TopBuilderItem, error) {
+	if minCount < 0 {
+		minCount = 0
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	items, err := s.repo.BuildersWithMinProjects(ctx, minCount, limit)
+	if err != nil {
+		return nil, fmt.Errorf("builders with min projects: %w", err)
+	}
+	if items == nil {
+		items = []TopBuilderItem{}
 	}
 	return items, nil
 }
