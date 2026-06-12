@@ -27,6 +27,7 @@ func main() {
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
+		// Dev default — matches docker-compose.yml. Set DATABASE_URL in production.
 		dsn = "postgres://infralens:infralens@127.0.0.1:5433/infralens?sslmode=disable"
 	}
 	port := os.Getenv("PORT")
