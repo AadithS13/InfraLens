@@ -62,10 +62,10 @@ export default function SearchPage() {
       <div className="text-center mb-10 animate-fade-up">
         <div
           className="inline-flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-full mb-4"
-          style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.25)", color: "#92400e" }}
+          style={{ background: "rgba(37,99,235,0.07)", border: "1px solid rgba(37,99,235,0.18)", color: "#1d4ed8" }}
         >
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse-dot" />
-          Claude Haiku · ~₹0.05 per query
+          <span className="w-1.5 h-1.5 rounded-full animate-pulse-dot" style={{ background: "#3b82f6" }} />
+          AI-powered search
         </div>
         <h1 className="text-4xl font-bold text-[#0f1e3d] mb-3 tracking-tight">
           Ask anything about<br />
@@ -165,7 +165,7 @@ export default function SearchPage() {
             </svg>
           </div>
           <div>
-            <p className="text-[#1e3a5f] text-sm font-semibold">Claude Haiku is parsing your query</p>
+            <p className="text-[#1e3a5f] text-sm font-semibold">Natural language → structured project data</p>
             <p className="text-[#9baabf] text-xs mt-1 font-mono">extracting filters · searching 57k+ projects</p>
           </div>
         </div>
@@ -215,9 +215,9 @@ export default function SearchPage() {
               )}
               <span
                 className="ml-auto text-[10px] font-semibold px-2.5 py-1 rounded-full shrink-0"
-                style={{ background: "rgba(245,158,11,0.1)", color: "#92400e", border: "1px solid rgba(245,158,11,0.2)" }}
+                style={{ background: "rgba(37,99,235,0.07)", color: "#1d4ed8", border: "1px solid rgba(37,99,235,0.15)" }}
               >
-                Claude Haiku · ~₹0.05
+                AI Search
               </span>
             </div>
           </div>
@@ -323,7 +323,7 @@ export default function SearchPage() {
             </svg>
           </div>
           <p className="text-[#4b5e7f] text-sm font-semibold">Type a question to search</p>
-          <p className="text-[#9baabf] text-xs mt-1 font-mono">natural language · powered by Claude Haiku</p>
+          <p className="text-[#9baabf] text-xs mt-1 font-mono">natural language → structured project data</p>
         </div>
       )}
     </div>

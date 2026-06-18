@@ -123,7 +123,7 @@ export default function Background() {
       <svg
         viewBox="0 0 1440 560"
         preserveAspectRatio="xMidYMax meet"
-        style={{ position: "absolute", bottom: 0, left: 0, width: "100%", height: "72%", opacity: 0.28 }}
+        style={{ position: "absolute", bottom: 0, left: 0, width: "100%", height: "72%", opacity: 0.04 }}
       >
         <defs>
           {/* window pattern */}
