@@ -1,8 +1,8 @@
 # InfraLens
 
-A construction intelligence platform that crawls public RERA registries, normalizes project and promoter metadata, tracks field-level changes, fires notifications when high-value fields shift, and exposes a REST API for search and analytics.
+A construction intelligence platform that crawls public RERA registries, normalizes project and promoter metadata, tracks field-level changes, fires notifications when high-value fields shift, exposes a REST API for search and analytics — and surfaces all of it through a purpose-built Next.js frontend.
 
-Inspired by platforms like Biltrax — built to demonstrate real-world data engineering: web crawling, API reverse engineering, idempotent ingestion, change detection, notification pipelines, and layered API design.
+Inspired by platforms like Biltrax — built to demonstrate real-world data engineering: web crawling, API reverse engineering, idempotent ingestion, change detection, notification pipelines, layered API design, and production-quality UI.
 
 ---
 
@@ -907,6 +907,67 @@ PostgreSQL
 | Builder risk insights — delay patterns, status change frequency | 🔜 |
 | Completion delay prediction — based on historical change data | 🔜 |
 
+**V8 — Frontend**
+
+| Feature | Status |
+|---|---|
+| Next.js App Router dashboard — stat cards, status distribution, top builders, crawl history | ✅ Done |
+| NL Search UI — plain-English queries, interpreted filter chips, project result cards | ✅ Done |
+| Projects browser — filter bar, paginated table, status pills, project detail pages | ✅ Done |
+| Change history timeline — field-level diffs with old→new value display | ✅ Done |
+| Blueprint White design system — construction cityscape, animated cranes, frosted glass | ✅ Done |
+
+---
+
+## Frontend (V8)
+
+A full Next.js dashboard that turns the REST API into a live product. Blueprint White design system — light background, animated construction cityscape, frosted-glass cards.
+
+### Screenshots
+
+| Dashboard | NL Search | Projects |
+|---|---|---|
+| ![Dashboard](docs/screenshots/frontend_dashboard.png) | ![NL Search](docs/screenshots/frontend_search.png) | ![Projects](docs/screenshots/frontend_projects.png) |
+
+### Pages
+
+| Page | Route | Description |
+|---|---|---|
+| **Dashboard** | `/` | Live stat counters (total projects, builders, districts), status distribution bars, top builders table, crawl run history |
+| **NL Search** | `/search` | Plain-English queries powered by Claude Haiku, interpreted filter chips, result cards with RERA metadata |
+| **Projects** | `/projects` | Filter bar (name/promoter, status, type, district), paginated results table, clickable rows |
+| **Project Detail** | `/projects/:id` | Full project info, unit counts, RERA registration, change history timeline with old→new value diffs |
+
+### Design System
+
+- **Blueprint White** — `#eef2fb` background, blueprint blue dot grid that drifts slowly
+- **Animated construction cityscape** — SVG buildings under construction with 4 working tower cranes (jibs sweep back and forth using SVG-native `<animateTransform>`), hoists riding up scaffold tracks, and scaffold opacity pulses
+- **Frosted glass cards** — `backdrop-filter: blur(12px)`, white at 72% opacity, blue-tinted borders
+- **Floating orbs** — amber and blue radial blurs that drift behind the cityscape
+- **Animated counters** — stat numbers count up from zero on load with cubic ease-out
+- **Palette** — blueprint blue `#2563eb`, amber `#f59e0b`, dark ink `#0f1e3d`
+
+### Running the Frontend
+
+```bash
+cd frontend
+npm install        # first time only
+npm run dev        # starts on http://localhost:3000
+```
+
+The frontend expects the Go API running on `http://localhost:8080`. Set `NEXT_PUBLIC_API_URL` to override:
+
+```bash
+NEXT_PUBLIC_API_URL=https://api.yourhost.com npm run dev
+```
+
+### Frontend Tech Stack
+
+- **Next.js 16.2.9** — App Router, Turbopack, Server + Client Components
+- **TypeScript** — end-to-end type safety
+- **Tailwind CSS v4** — utility-first styles, `@import "tailwindcss"` (no config file)
+- **Inter** — loaded via `next/font/google` (not `@import url()` — Turbopack compatibility)
+
 ---
 
 ## Tech Stack
@@ -917,6 +978,8 @@ PostgreSQL
 - **PostgreSQL 16** — primary store
 - **Docker** — local Postgres via docker-compose
 - **Anthropic Go SDK** (`anthropic-sdk-go v1.50.1`) — V7.2 LLM-powered NL query parsing via Claude Haiku
+- **Next.js 16.2.9** — frontend dashboard (App Router, Turbopack)
+- **TypeScript + Tailwind CSS v4** — frontend language and styling
 
 ---
 
@@ -926,6 +989,7 @@ PostgreSQL
 
 - Go 1.22+
 - Docker
+- Node.js 18+ (for the frontend)
 
 ### 1. Start Postgres
 
@@ -951,6 +1015,16 @@ DATABASE_URL="postgres://infralens:infralens@127.0.0.1:5433/infralens?sslmode=di
   PORT=8080 \
   go run ./cmd/api/
 ```
+
+### 4. Run the frontend
+
+```bash
+cd frontend
+npm install   # first time only
+npm run dev   # http://localhost:3000
+```
+
+Open `http://localhost:3000`. The dashboard, NL search, projects browser, and project detail pages connect to the API at `localhost:8080` by default.
 
 ### Environment Variables
 
@@ -1054,6 +1128,22 @@ InfraLens/
 │           ├── analytics.go     # HTTP handlers — status dist, top builders, by district
 │           ├── search.go        # HTTP handler — full-text search suggestions
 │           └── nlsearch.go      # HTTP handler — natural language search (V7.1 / V7.2)
+├── frontend/                    # Next.js 16 dashboard (V8)
+│   ├── app/
+│   │   ├── layout.tsx           # Root layout — Background + Sidebar, Inter font
+│   │   ├── globals.css          # Tailwind v4, keyframes, glass-card, Blueprint White vars
+│   │   ├── page.tsx             # Dashboard — stat cards, status bars, builders, crawl runs
+│   │   ├── search/
+│   │   │   └── page.tsx         # NL Search — Claude Haiku query UI, filter chips, results
+│   │   └── projects/
+│   │       ├── page.tsx         # Projects browser — filter bar, paginated table
+│   │       └── [id]/page.tsx    # Project detail — info grid, change history timeline
+│   ├── components/
+│   │   ├── Background.tsx       # Fixed cityscape — dot grid, orbs, SVG construction scene
+│   │   ├── Sidebar.tsx          # Frosted sidebar — logo, nav links, AI status badge
+│   │   └── AnimatedCounter.tsx  # Client component — count-up with cubic ease-out
+│   └── lib/
+│       └── api.ts               # Typed fetch wrappers for all REST endpoints
 ├── migrations/
 └── docker-compose.yml
 ```

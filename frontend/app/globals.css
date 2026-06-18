@@ -1,0 +1,120 @@
+@import "tailwindcss";
+
+/* ── Keyframes ───────────────────────────────────────────────────────────── */
+
+@keyframes crane-a {
+  0%,100% { transform: rotate(-7deg); }
+  50%      { transform: rotate(7deg); }
+}
+@keyframes crane-b {
+  0%,100% { transform: rotate(5deg); }
+  50%      { transform: rotate(-5deg); }
+}
+@keyframes crane-c {
+  0%,100% { transform: rotate(-9deg); }
+  50%      { transform: rotate(9deg); }
+}
+@keyframes hook-a {
+  0%,100% { transform: translateY(0); }
+  50%      { transform: translateY(30px); }
+}
+@keyframes hook-b {
+  0%,100% { transform: translateY(0); }
+  50%      { transform: translateY(24px); }
+}
+@keyframes hook-c {
+  0%,100% { transform: translateY(0); }
+  50%      { transform: translateY(38px); }
+}
+@keyframes scaffold-pulse {
+  0%,100% { opacity: 0.75; }
+  50%      { opacity: 1; }
+}
+@keyframes hoist-ride {
+  0%,100% { transform: translateY(0); }
+  50%      { transform: translateY(-55px); }
+}
+
+@keyframes float1 {
+  0%,100% { transform: translate(0,0) scale(1); }
+  33%      { transform: translate(70px,-55px) scale(1.06); }
+  66%      { transform: translate(-45px,65px) scale(0.95); }
+}
+@keyframes float2 {
+  0%,100% { transform: translate(0,0) scale(1); }
+  33%      { transform: translate(-80px,60px) scale(0.94); }
+  66%      { transform: translate(55px,-75px) scale(1.05); }
+}
+@keyframes float3 {
+  0%,100% { transform: translate(0,0); }
+  50%      { transform: translate(35px,-45px); }
+}
+@keyframes grid-drift {
+  0%   { background-position: 0 0; }
+  100% { background-position: 28px 28px; }
+}
+@keyframes fade-up {
+  from { opacity:0; transform:translateY(14px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+@keyframes pulse-dot {
+  0%,100% { opacity:1; transform:scale(1); }
+  50%      { opacity:.5; transform:scale(.7); }
+}
+@keyframes count-up {
+  from { opacity:0; transform:translateY(8px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+
+/* ── Utilities ───────────────────────────────────────────────────────────── */
+
+.animate-float1   { animation: float1 24s ease-in-out infinite; }
+.animate-float2   { animation: float2 30s ease-in-out infinite; }
+.animate-float3   { animation: float3 19s ease-in-out infinite; }
+.animate-fade-up  { animation: fade-up .45s ease-out both; }
+.animate-pulse-dot{ animation: pulse-dot 2s ease-in-out infinite; }
+.animate-spin     { animation: spin 1s linear infinite; }
+
+.delay-100 { animation-delay:.1s; }
+.delay-200 { animation-delay:.2s; }
+.delay-300 { animation-delay:.3s; }
+.delay-400 { animation-delay:.4s; }
+
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+
+body {
+  background: #eef2fb;
+  color: #0f1e3d;
+  font-family: var(--font-inter, Inter, system-ui, sans-serif);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection { background: rgba(37,99,235,.18); color: #1e3a8a; }
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width:5px; height:5px; }
+::-webkit-scrollbar-track { background:#e8edf8; }
+::-webkit-scrollbar-thumb { background:#c5d0e8; border-radius:3px; }
+::-webkit-scrollbar-thumb:hover { background:#aab5d4; }
+
+/* ── Frosted-glass card ──────────────────────────────────────────────────── */
+.glass-card {
+  background: rgba(255,255,255,.72);
+  border: 1px solid rgba(59,107,204,.12);
+  border-radius: 16px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 1px 3px rgba(15,30,61,.06), 0 4px 16px rgba(15,30,61,.04);
+  transition: border-color .2s, box-shadow .2s;
+}
+.row-hover:hover { background: rgba(37,99,235,0.03); }
+
+.glass-card:hover {
+  border-color: rgba(59,107,204,.22);
+  box-shadow: 0 2px 8px rgba(15,30,61,.08), 0 8px 32px rgba(15,30,61,.06);
+}
