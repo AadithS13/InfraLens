@@ -12,6 +12,16 @@ const STATUS_COLORS: Record<string, { text: string; bg: string; border: string }
   "Under Approval": { text: "#b45309", bg: "rgba(180,83,9,0.08)",    border: "rgba(180,83,9,0.2)" },
 };
 
+const FILTER_LABELS: Record<string, string> = {
+  status:       "Status",
+  district:     "District",
+  type:         "Type",
+  delayed:      "Delayed",
+  min_projects: "Min Projects",
+  filter:       "Filter",
+  q:            "Query",
+};
+
 const EXAMPLE_QUERIES = [
   "show ongoing residential projects in Thane",
   "plotted development projects that missed their deadline",
@@ -214,13 +224,37 @@ export default function SearchPage() {
                 ))
               )}
               <span
-                className="ml-auto text-[10px] font-semibold px-2.5 py-1 rounded-full shrink-0"
+                className="ml-auto text-[10px] font-semibold px-2.5 py-1 rounded-full shrink-0 tabular-nums"
                 style={{ background: "rgba(37,99,235,0.07)", color: "#1d4ed8", border: "1px solid rgba(37,99,235,0.15)" }}
               >
-                AI Search
+                Parsed filters: {Object.keys(result.interpreted).length}
               </span>
             </div>
           </div>
+
+          {/* AI explanation */}
+          {Object.keys(result.interpreted).length > 0 && (
+            <div
+              className="rounded-xl px-5 py-4"
+              style={{ background: "rgba(37,99,235,0.03)", border: "1px solid rgba(37,99,235,0.09)" }}
+            >
+              <p className="text-[11px] font-semibold text-[#9baabf] uppercase tracking-wider mb-2.5">
+                Searching for {result.query_type === "builders" ? "builders" : "projects"} where
+              </p>
+              <ul className="space-y-1.5">
+                {Object.entries(result.interpreted).map(([k, v]) => (
+                  <li key={k} className="flex items-center gap-2.5">
+                    <span className="w-1 h-1 rounded-full shrink-0" style={{ background: "#2563eb" }} />
+                    <span className="text-sm">
+                      <span className="font-semibold text-[#1e3a5f]">{FILTER_LABELS[k] ?? k}</span>
+                      <span className="mx-2 text-[#c5d0e8]">=</span>
+                      <span className="font-mono text-[#2563eb]">{String(v)}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Builder results */}
           {result.query_type === "builders" && (
