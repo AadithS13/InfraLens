@@ -97,7 +97,7 @@ export default function Background() {
       {/* Blueprint dot grid */}
       <div style={{
         position: "absolute", inset: 0,
-        backgroundImage: `radial-gradient(${B}0.18) 1.5px, transparent 1.5px)`,
+        backgroundImage: `radial-gradient(${B}0.07) 1.5px, transparent 1.5px)`,
         backgroundSize: "28px 28px",
         animation: "grid-drift 10s linear infinite",
       }}/>
@@ -106,24 +106,24 @@ export default function Background() {
       <div className="animate-float1 absolute" style={{
         top: "-8%", left: "-4%", width: "520px", height: "520px",
         borderRadius: "50%", filter: "blur(52px)",
-        background: `radial-gradient(circle,${A}0.28) 0%,${A}0.10) 40%,transparent 68%)`,
+        background: `radial-gradient(circle,${A}0.10) 0%,${A}0.03) 40%,transparent 68%)`,
       }}/>
       <div className="animate-float2 absolute" style={{
         bottom: "-10%", right: "-6%", width: "560px", height: "560px",
         borderRadius: "50%", filter: "blur(56px)",
-        background: `radial-gradient(circle,${B}0.20) 0%,${B}0.07) 42%,transparent 68%)`,
+        background: `radial-gradient(circle,${B}0.07) 0%,${B}0.02) 42%,transparent 68%)`,
       }}/>
       <div className="animate-float3 absolute" style={{
         top: "28%", right: "20%", width: "250px", height: "250px",
         borderRadius: "50%", filter: "blur(30px)",
-        background: `radial-gradient(circle,${A}0.14) 0%,transparent 70%)`,
+        background: `radial-gradient(circle,${A}0.05) 0%,transparent 70%)`,
       }}/>
 
       {/* ── Construction cityscape ─────────────────────────────────── */}
       <svg
         viewBox="0 0 1440 560"
         preserveAspectRatio="xMidYMax meet"
-        style={{ position: "absolute", bottom: 0, left: 0, width: "100%", height: "72%" }}
+        style={{ position: "absolute", bottom: 0, left: 0, width: "100%", height: "72%", opacity: 0.28 }}
       >
         <defs>
           {/* window pattern */}
@@ -154,8 +154,8 @@ export default function Background() {
             <stop offset="100%" stopColor={`${BG}1)`}/>
           </linearGradient>
           <linearGradient id="ft" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stopColor={`${BG}0.88)`}/>
-            <stop offset="28%"  stopColor={`${BG}0)`}/>
+            <stop offset="0%"   stopColor={`${BG}1)`}/>
+            <stop offset="55%"  stopColor={`${BG}0)`}/>
           </linearGradient>
         </defs>
 
